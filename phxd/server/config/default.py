@@ -38,7 +38,7 @@ SSL_CERT_FILE = 'certs/cacert.pem'
 ################################################################################
 
 ENABLE_TRACKER_REGISTER = False
-TRACKER_ADDRESS = "tracker.example.com"
+TRACKER_ADDRESS = "hltracker.com"
 TRACKER_PORT = 5499
 TRACKER_PASSWORD = ""
 TRACKER_INTERVAL = 5 * 60

@@ -39,13 +39,16 @@ class TrackerPinger (DatagramProtocol):
 
     def __init__(self, tracker_ip, tracker_port, server_id, name, desc, port, users, passwd=""):
         self.tracker_ip, self.tracker_port = tracker_ip, tracker_port
+        namedata = name.encode('utf-8')
+        descdata = desc.encode('utf-8')
+        passdata = passwd.encode('utf-8')
         self.data = pack("!4HL", 1, port, users, 0, server_id)
-        self.data += chr(len(name))
-        self.data += name
-        self.data += chr(len(desc))
-        self.data += desc
-        self.data += chr(len(passwd))
-        self.data += passwd
+        self.data += bytes([len(namedata)])
+        self.data += namedata
+        self.data += bytes([len(descdata)])
+        self.data += descdata
+        self.data += bytes([len(passdata)])
+        self.data += passdata
 
     def doSend(self, ip):
         self.transport.connect(ip, self.tracker_port)
