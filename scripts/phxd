@@ -1,0 +1,65 @@
+#!/usr/bin/env python
+
+from pydispatch import dispatcher
+from twisted.internet import reactor
+
+from phxd.server import HLServer, handlers
+from phxd.server.config import conf
+from phxd.server.signals import signal_reload
+
+import logging
+import os
+import signal
+import sys
+
+
+def load_config():
+    try:
+        mod = __import__("config", None, None, [])
+        conf.update(mod)
+        return mod.__file__
+    except Exception as e:
+        from phxd.server.config import default
+        return default.__file__
+
+
+def dispatch_signal(signum):
+    if signum == signal.SIGHUP:
+        load_config()
+        handlers.reload_all()
+        dispatcher.send(signal=signal_reload)
+
+
+def signal_handler(signum, frame):
+    reactor.callLater(0, dispatch_signal, signum)
+
+
+if __name__ == "__main__":
+    # try to update the default config settings with the local ones
+    from_file = load_config()
+
+    # set up logging
+    logging.basicConfig(
+        filename=conf.LOG_FILE,
+        level=conf.LOG_LEVEL,
+        format='%(asctime)s %(levelname)-8s %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+
+    logging.info('config loaded from %s' % from_file)
+
+    # install the default handlers, and look for any additional handlers
+    handlers.install_all()
+    try:
+        local_handlers = __import__("handlers", None, None, [])
+        for name in local_handlers.__all__:
+            handlers.install("handlers", name)
+    except:
+        pass
+
+    # register for SIGHUP signals to reload handlers/config
+    signal.signal(signal.SIGHUP, signal_handler)
+
+    server = HLServer()
+    server.start()
+    reactor.run()

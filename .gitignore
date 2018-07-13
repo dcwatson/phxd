@@ -1,0 +1,13 @@
+__pycache__
+*.pyc
+*.log
+*.db
+
+/chatlogs
+/files
+/certs
+/config.py
+
+/build
+/dist
+*.egg-info
