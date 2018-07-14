@@ -14,13 +14,13 @@ import time
 class HLDownload (HLOutgoingTransfer):
     def __str__(self):
         kps = self.getTotalBPS() / 1024
-        return "[DL] %s @ %sk/sec (%s%%)" % (self.name, kps, self.overallPercent())
+        return "[DL] %s @ %sk/sec (%s%%)" % (self.file.name, kps, self.overallPercent())
 
 
 class HLUpload (HLIncomingTransfer):
     def __str__(self):
         kps = self.getTotalBPS() / 1024
-        return "[UL] %s @ %sk/sec (%s%%)" % (self.name, kps, self.overallPercent())
+        return "[UL] %s @ %sk/sec (%s%%)" % (self.file.name, kps, self.overallPercent())
 
 
 class HLFileServer (Factory):
@@ -60,16 +60,16 @@ class HLFileServer (Factory):
 
     # Convenience methods called from the file handler
 
-    def addUpload(self, user, path):
+    def addUpload(self, user, file):
         self.lastTransferID += 1
-        info = HLUpload(self.lastTransferID, path)
+        info = HLUpload(self.lastTransferID, file)
         info.owner = user.uid
         self.transfers.append(info)
         return info
 
-    def addDownload(self, user, path, offset):
+    def addDownload(self, user, file, resume):
         self.lastTransferID += 1
-        info = HLDownload(self.lastTransferID, path, offset)
+        info = HLDownload(self.lastTransferID, file, resume)
         info.owner = user.uid
         self.transfers.append(info)
         return info

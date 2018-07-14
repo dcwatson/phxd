@@ -26,6 +26,10 @@ def HLCharConst(s):
     return 0 + (ord(s[0]) << 24) + (ord(s[1]) << 16) + (ord(s[2]) << 8) + ord(s[3])
 
 
+def HLDecodeConst(n):
+    return chr((n & 0xFF000000) >> 24) + chr((n & 0x00FF0000) >> 16) + chr((n & 0x0000FF00) >> 8) + chr(n & 0x000000FF)
+
+
 def HLEncode(s, encoding='utf-8'):
     if s is not None:
         utf8 = s.encode(encoding)

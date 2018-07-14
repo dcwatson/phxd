@@ -1,7 +1,9 @@
-from phxd.utils import HLCharConst
+from phxd.utils import HLCharConst, HLDecodeConst
 
 from datetime import datetime
 from struct import pack, unpack
+import io
+import os
 import re
 
 
@@ -194,3 +196,173 @@ class HLResumeData:
         for forkType in self.forkOffsets.keys():
             data += pack("!4L", forkType, self.forkOffsets[forkType], 0, 0)
         return data
+
+    def totalOffset(self):
+        return sum(self.forkOffsets.values())
+
+
+class HLFile:
+
+    def __init__(self, path):
+        head, self.name = os.path.split(path)
+        self.dataPath = path
+        self.dataFile = None
+        self.rsrcPath = os.path.join(head, '._' + self.name)
+        self.rsrcFile = None
+        self.info = io.BytesIO()
+
+    def isdir(self):
+        return os.path.isdir(self.dataPath)
+
+    def exists(self):
+        return os.path.exists(self.dataPath) or os.path.exists(self.rsrcPath)
+
+    def size(self, fork=None):
+        if self.isdir():
+            return len([f for f in os.listdir(self.dataPath) if not f.startswith('.')])
+        else:
+            total = 0
+            if os.path.exists(self.dataPath) and fork in (None, 'DATA'):
+                total += os.path.getsize(self.dataPath)
+            if os.path.exists(self.rsrcPath) and fork in (None, 'MACR'):
+                total += os.path.getsize(self.rsrcPath)
+            return total
+
+    def forks(self):
+        forkList = []
+        if os.path.exists(self.dataPath):
+            forkList.append("DATA")
+        if os.path.exists(self.rsrcPath):
+            forkList.append("MACR")
+        return forkList
+
+    def write(self, fork, data):
+        if fork == "DATA":
+            if self.dataFile is None:
+                self.dataFile = open(self.dataPath, "ab")
+            self.dataFile.write(data)
+        elif fork == "MACR":
+            if self.rsrcFile is None:
+                self.rsrcFile = open(self.rsrcPath, "ab")
+            self.rsrcFile.write(data)
+        elif fork == "INFO":
+            # Store any INFO fork data, so we can extract the type/creator codes later.
+            self.info.write(data)
+
+    def seek(self, fork, pos):
+        if fork == "DATA":
+            if self.dataFile is None:
+                self.dataFile = open(self.dataPath, "rb")
+            self.dataFile.seek(pos)
+        elif fork == "MACR":
+            if self.rsrcFile is None:
+                self.rsrcFile = open(self.rsrcPath, "rb")
+            self.rsrcFile.seek(pos)
+
+    def read(self, fork, size):
+        if fork == "DATA":
+            if self.dataFile is None:
+                self.dataFile = open(self.dataPath, "rb")
+            return self.dataFile.read(size)
+        elif fork == "MACR":
+            if self.rsrcFile is None:
+                self.rsrcFile = open(self.rsrcPath, "rb")
+            return self.rsrcFile.read(size)
+
+    def close(self):
+        if self.dataFile:
+            self.dataFile.close()
+            self.dataFile = None
+        if self.rsrcFile:
+            self.rsrcFile.close()
+            self.rsrcFile = None
+        # If this file was uploaded with an INFO fork, save the type/creator codes.
+        info = self.info.getvalue()
+        if info and len(info) >= 12:
+            typeCode, creatorCode = unpack("!2L", info[4:12])
+            self.setType(HLDecodeConst(typeCode))
+            self.setCreator(HLDecodeConst(creatorCode))
+
+    def delete(self):
+        if os.path.exists(self.dataPath):
+            os.unlink(self.dataPath)
+        if os.path.exists(self.rsrcPath):
+            os.unlink(self.rsrcPath)
+        if os.path.exists(self.rsrcPath + '.TYPE'):
+            os.unlink(self.rsrcPath + '.TYPE')
+        if os.path.exists(self.rsrcPath + '.CREATOR'):
+            os.unlink(self.rsrcPath + '.CREATOR')
+
+    def resumeData(self):
+        resume = HLResumeData()
+        if os.path.exists(self.dataPath):
+            resume.setForkOffset(HLCharConst("DATA"), os.path.getsize(self.dataPath))
+        if os.path.exists(self.rsrcPath):
+            resume.setForkOffset(HLCharConst("MACR"), os.path.getsize(self.rsrcPath))
+        return resume
+
+    def getType(self):
+        if self.isdir():
+            return HLCharConst("fldr")
+        elif self.name.endswith(".hpf"):
+            return HLCharConst("HTft")
+        else:
+            try:
+                return HLCharConst(open(self.rsrcPath + '.TYPE', 'r').read(4))
+            except:
+                return HLCharConst("????")
+
+    def getCreator(self):
+        if self.isdir():
+            return 0
+        elif self.name.endswith(".hpf"):
+            return HLCharConst("HTLC")
+        else:
+            try:
+                return HLCharConst(open(self.rsrcPath + '.CREATOR', 'r').read(4))
+            except:
+                return HLCharConst("????")
+
+    def setType(self, typeCode):
+        with open(self.rsrcPath + '.TYPE', 'w') as f:
+            f.write(typeCode)
+
+    def setCreator(self, creatorCode):
+        with open(self.rsrcPath + '.CREATOR', 'w') as f:
+            f.write(creatorCode)
+
+    def flatten(self):
+        namedata = self.name.encode('utf-8')
+        size = self.size()
+        return pack("!5L", self.getType(), self.getCreator(), size, size, len(namedata)) + namedata
+
+    def streamSize(self, resume):
+        namedata = self.name.encode('utf-8')
+        total = 24 + 16 + 74 + len(namedata)  # FILP header + INFO fork
+        for fork in self.forks():
+            offset = resume.forkOffset(HLCharConst(fork))
+            remaining = self.size(fork) - offset
+            total += 16 + remaining
+        return total
+
+    def stream(self, resume, chunkSize=16384):
+        forks = self.forks()
+        namedata = self.name.encode('utf-8')
+        yield pack("!LHLLLLH", HLCharConst("FILP"), 1, 0, 0, 0, 0, len(forks) + 1)
+        yield pack("!4L", HLCharConst("INFO"), 0, 0, 74 + len(namedata))
+        yield pack("!5L", HLCharConst("AMAC"), self.getType(), self.getCreator(), 0, 0)
+        yield bytes(32)
+        yield pack("!HHL", 0, 0, 0)  # date created
+        yield pack("!HHL", 0, 0, 0)  # date modified
+        yield pack("!HH", 0, len(namedata))
+        yield namedata
+        yield pack("!H", 0)
+        for fork in forks:
+            offset = resume.forkOffset(HLCharConst(fork))
+            remaining = self.size(fork) - offset
+            yield pack("!4L", HLCharConst(fork), 0, 0, remaining)
+            self.seek(fork, offset)
+            data = self.read(fork, chunkSize)
+            while data:
+                yield data
+                data = self.read(fork, chunkSize)

@@ -6,11 +6,11 @@ from phxd.permissions import *
 from phxd.server.config import conf
 from phxd.server.decorators import *
 from phxd.server.signals import *
-from phxd.types import HLException, HLResumeData
-from phxd.utils import HLCharConst, HLEncodeDate, decodeString
+from phxd.types import HLException, HLFile, HLResumeData
+from phxd.utils import HLEncodeDate, decodeString
 
 from datetime import datetime
-from struct import pack, unpack
+from struct import unpack
 import os
 
 
@@ -23,15 +23,11 @@ def uninstall():
 
 
 def handleTransferFinished(server, transfer):
-    if transfer.isIncoming() and transfer.isComplete() and transfer.path.endswith(".hpf"):
-        newPath = transfer.path[:-4]
-        os.rename(transfer.path, newPath)
-        transfer.path = newPath
-        transfer.name = os.path.basename(transfer.path)
+    if transfer.isIncoming() and transfer.isComplete():
         if conf.UPLOAD_SCRIPT:
             user = server.getUser(transfer.owner)
             pargs = [
-                str(transfer.path),
+                transfer.file.dataPath,
             ]
             environ = {
                 'USER_LOGIN': str(user.account.login),
@@ -72,23 +68,6 @@ def buildPath(root, d, file=None):
     return os.path.join(*pathArray)
 
 
-def getFileType(path):
-    if os.path.isdir(path):
-        return HLCharConst("fldr")
-    elif path.endswith(".hpf"):
-        return HLCharConst("HTft")
-    else:
-        return HLCharConst("????")
-
-
-def getFileCreator(path):
-    if os.path.isdir(path):
-        return 0
-    elif path.endswith(".hpf"):
-        return HLCharConst("HTLC")
-    else:
-        return HLCharConst("????")
-
 # handler methods
 
 
@@ -110,16 +89,8 @@ def handleFileList(server, user, packet):
     for fname in files:
         if conf.SHOW_DOTFILES or (fname[0] != '.'):
             # Only list files starting with . if SHOW_DOTFILES is True.
-            fpath = os.path.join(path, fname)
-            type = getFileType(fpath)
-            creator = getFileCreator(fpath)
-            if os.path.isdir(fpath):
-                size = len(os.listdir(fpath))
-            else:
-                size = os.path.getsize(fpath)
-            namedata = fname.encode('utf-8')
-            data = pack("!5L", type, creator, size, size, len(namedata)) + namedata
-            reply.addBinary(DATA_FILE, data)
+            file = HLFile(os.path.join(path, fname))
+            reply.addBinary(DATA_FILE, file.flatten())
     server.sendPacket(reply, user)
 
 
@@ -135,9 +106,9 @@ def handleFileDownload(server, user, packet):
     if not os.path.exists(path):
         raise HLException("Specified file does not exist.")
 
-    offset = resume.forkOffset(HLCharConst("DATA"))
-    xfer = server.fileserver.addDownload(user, path, offset)
-    dataSize = os.path.getsize(path) - offset
+    file = HLFile(path)
+    xfer = server.fileserver.addDownload(user, file, resume)
+    dataSize = file.size() - resume.totalOffset()
 
     reply = packet.response()
     reply.addNumber(DATA_XFERSIZE, xfer.total)
@@ -167,18 +138,14 @@ def handleFileUpload(server, user, packet):
     if size >= free:
         raise HLException("Insufficient disk space.")
 
-    # All uploads in progress should have this extension.
-    path += ".hpf"
-
-    xfer = server.fileserver.addUpload(user, path)
+    file = HLFile(path)
+    xfer = server.fileserver.addUpload(user, file)
     xfer.total = size
 
     reply = packet.response()
     reply.addNumber(DATA_XFERID, xfer.id)
-    if os.path.exists(path):
-        resume = HLResumeData()
-        resume.setForkOffset(HLCharConst("DATA"), os.path.getsize(path))
-        reply.addBinary(DATA_RESUME, resume.flatten())
+    if file.exists():
+        reply.addBinary(DATA_RESUME, file.resumeData().flatten())
     server.sendPacket(reply, user)
 
 
@@ -203,7 +170,8 @@ def handleFileDelete(server, user, packet):
     else:
         if not user.hasPriv(PRIV_DELETE_FILES):
             raise HLException("You are not allowed to delete files.")
-        os.unlink(path)
+        file = HLFile(path)
+        file.delete()
     server.sendPacket(packet.response(), user)
 
 
@@ -247,13 +215,14 @@ def handleFileGetInfo(server, user, packet):
     if not os.path.exists(path):
         raise HLException("No such file or directory.")
 
+    file = HLFile(path)
     d = datetime.fromtimestamp(os.path.getmtime(path))
 
     info = packet.response()
     info.addString(DATA_FILENAME, name)
-    info.addNumber(DATA_FILESIZE, os.path.getsize(path))
-    info.addNumber(DATA_FILETYPE, getFileType(path))
-    info.addNumber(DATA_FILECREATOR, getFileCreator(path))
+    info.addNumber(DATA_FILESIZE, file.size())
+    info.addNumber(DATA_FILETYPE, file.getType())
+    info.addNumber(DATA_FILECREATOR, file.getCreator())
     info.addBinary(DATA_DATECREATED, HLEncodeDate(d))
     info.addBinary(DATA_DATEMODIFIED, HLEncodeDate(d))
     server.sendPacket(info, user)

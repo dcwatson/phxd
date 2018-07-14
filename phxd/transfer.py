@@ -1,16 +1,14 @@
-from phxd.utils import HLCharConst
+from phxd.utils import HLDecodeConst
 
-from struct import pack, unpack
-import os
+from struct import unpack
 import time
 
 
 class HLTransfer:
 
-    def __init__(self, id, path, incoming):
+    def __init__(self, id, file, incoming):
         self.id = id
-        self.path = path
-        self.name = os.path.basename(path)
+        self.file = file
         self.total = 0
         self.transferred = 0
         self.offset = 0
@@ -60,58 +58,31 @@ class HLOutgoingTransfer(HLTransfer):
 
     READ_SIZE = 2 ** 14
 
-    def __init__(self, id, path, offset=0):
-        HLTransfer.__init__(self, id, path, False)
-        self.offset = offset
-        self.file = open(path, "rb")
-        self.file.seek(offset)
-
-        # calculate how much actual data is left to send, and
-        # build the FILP header, INFO fork, and DATA header
-        dataSize = os.path.getsize(path) - offset
-        self.header = self._buildHeaderData(self.name, dataSize)
-        self.total = len(self.header) + dataSize
-        self.sentHeader = False
+    def __init__(self, id, file, resume):
+        HLTransfer.__init__(self, id, file, False)
+        self.resume = resume
+        self.total = self.file.streamSize(resume)
+        self.stream = self.file.stream(resume, self.READ_SIZE)
 
     def overallPercent(self):
-        done = self.offset + self.transferred
-        total = os.path.getsize(self.path) + len(self.header)
-        if total > 0:
-            return int((float(done) / float(total)) * 100)
+        # TODO: this doesn't take into account previous partial transfers
+        if self.total > 0:
+            return int((float(self.transferred) / float(self.total)) * 100)
         return 0
 
     def getDataChunk(self):
         """ Returns the next chunk of data to be sent out. """
         self.lastActivity = time.time()
-        if self.sentHeader:
-            # We already sent the header, read from the file.
-            data = self.file.read(self.READ_SIZE)
+        try:
+            data = next(self.stream)
             self.transferred += len(data)
             return data
-        else:
-            # Send the header, mark it as sent.
-            self.sentHeader = True
-            self.transferred += len(self.header)
-            return self.header
+        except StopIteration:
+            return b''
 
     def finish(self):
         """ Called when the download connection closes. """
         self.file.close()
-
-    def _buildHeaderData(self, name, size):
-        """ Builds the header info for the file transfer, including the FILP header, INFO header and fork, and DATA header. """
-        namedata = name.encode('utf-8')
-        data = pack("!LHLLLLH", HLCharConst("FILP"), 1, 0, 0, 0, 0, 2)
-        data += pack("!4L", HLCharConst("INFO"), 0, 0, 74 + len(name))
-        data += pack("!5L", HLCharConst("AMAC"), HLCharConst("????"), HLCharConst("????"), 0, 0)
-        data += bytes(32)
-        data += pack("!HHL", 0, 0, 0)
-        data += pack("!HHL", 0, 0, 0)
-        data += pack("!HH", 0, len(namedata))
-        data += namedata
-        data += pack("!H", 0)
-        data += pack("!4L", HLCharConst("DATA"), 0, 0, size)
-        return data
 
 
 STATE_FILP = 0
@@ -121,14 +92,14 @@ STATE_FORK = 2
 
 class HLIncomingTransfer(HLTransfer):
 
-    def __init__(self, id, path):
-        HLTransfer.__init__(self, id, path, True)
-        self.file = open(path, "ab")
-        self.initialSize = os.path.getsize(path)
+    def __init__(self, id, file):
+        HLTransfer.__init__(self, id, file, True)
+        self.initialSize = self.file.size()
         self.buffer = b""
         self.state = STATE_FILP
         self.forkCount = 0
         self.currentFork = 0
+        self.forkName = ''
         self.forkSize = 0
         self.forkOffset = 0
 
@@ -156,22 +127,20 @@ class HLIncomingTransfer(HLTransfer):
                     return False
                 (self.currentFork, _r1, _r2, self.forkSize) = unpack("!4L", self.buffer[0:16])
                 self.buffer = self.buffer[16:]
+                self.forkName = HLDecodeConst(self.currentFork)
                 self.forkOffset = 0
                 self.state = STATE_FORK
             elif self.state == STATE_FORK:
                 remaining = self.forkSize - self.forkOffset
                 if len(self.buffer) < remaining:
                     # We don't have the rest of the fork yet.
-                    if self.currentFork == HLCharConst("DATA"):
-                        # Write to the file if this is the DATA fork.
-                        self.file.write(self.buffer)
+                    self.file.write(self.forkName, self.buffer)
                     self.forkOffset += len(self.buffer)
                     self.buffer = b""
                     return False
                 else:
                     # We got the rest of the current fork.
-                    if self.currentFork == HLCharConst("DATA"):
-                        self.file.write(self.buffer[0:remaining])
+                    self.file.write(self.forkName, self.buffer[0:remaining])
                     self.buffer = self.buffer[remaining:]
                     self.forkCount -= 1
                     if self.forkCount <= 0:
