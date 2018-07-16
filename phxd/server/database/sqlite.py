@@ -80,7 +80,8 @@ class SQLDatabase (HLDatabase):
 
     def saveAccount(self, acct):
         if acct.id:
-            pass
+            params = (acct.login, acct.password, acct.name, str(acct.privs), acct.profile, acct.id)
+            self._execute('update accounts set login=?, password=?, name=?, privs=?, profile=? where id=?', *params)
         else:
             params = (acct.login, acct.password, acct.name, str(acct.privs), acct.profile)
             self._execute('insert into accounts (login,password,name,privs,profile) values (?,?,?,?,?)', *params)
@@ -104,7 +105,8 @@ class SQLDatabase (HLDatabase):
         return (posts, len(posts))
 
     def saveNewsPost(self, post):
-        pass
+        sql = 'insert into news (nick,login,body,post_date) values (?,?,?,?)'
+        self._execute(sql, post.nick, post.login, post.body, post.date)
 
     def checkBanlist(self, addr):
         return None

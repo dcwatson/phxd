@@ -228,6 +228,23 @@ class HLFile:
                 total += os.path.getsize(self.rsrcPath)
             return total
 
+    def rename(self, newPath):
+        self.close()
+        head, name = os.path.split(newPath)
+        newRsrc = os.path.join(head, '._' + name)
+        if os.path.exists(self.dataPath):
+            os.rename(self.dataPath, newPath)
+        if os.path.exists(self.rsrcPath):
+            os.rename(self.rsrcPath, newRsrc)
+        if os.path.exists(self.rsrcPath + '.TYPE'):
+            os.rename(self.rsrcPath + '.TYPE', newRsrc + '.TYPE')
+        if os.path.exists(self.rsrcPath + '.CREATOR'):
+            os.rename(self.rsrcPath + '.CREATOR', newRsrc + '.CREATOR')
+        if os.path.exists(self.rsrcPath + '.COMMENT'):
+            os.rename(self.rsrcPath + '.COMMENT', newRsrc + '.COMMENT')
+        self.dataPath = newPath
+        self.rsrcPath = newRsrc
+
     def forks(self):
         forkList = []
         if os.path.exists(self.dataPath):
@@ -282,8 +299,10 @@ class HLFile:
             typeCode, creatorCode = unpack("!2L", info[4:12])
             self.setType(HLDecodeConst(typeCode))
             self.setCreator(HLDecodeConst(creatorCode))
+        self.info = io.BytesIO()
 
     def delete(self):
+        self.close()
         if os.path.exists(self.dataPath):
             os.unlink(self.dataPath)
         if os.path.exists(self.rsrcPath):
@@ -292,6 +311,8 @@ class HLFile:
             os.unlink(self.rsrcPath + '.TYPE')
         if os.path.exists(self.rsrcPath + '.CREATOR'):
             os.unlink(self.rsrcPath + '.CREATOR')
+        if os.path.exists(self.rsrcPath + '.COMMENT'):
+            os.unlink(self.rsrcPath + '.COMMENT')
 
     def resumeData(self):
         resume = HLResumeData()
@@ -323,6 +344,13 @@ class HLFile:
             except:
                 return HLCharConst("????")
 
+    def getComment(self):
+        try:
+            with open(self.rsrcPath + '.COMMENT', 'r') as f:
+                return f.read()
+        except:
+            return ""
+
     def setType(self, typeCode):
         with open(self.rsrcPath + '.TYPE', 'w') as f:
             f.write(typeCode)
@@ -330,6 +358,10 @@ class HLFile:
     def setCreator(self, creatorCode):
         with open(self.rsrcPath + '.CREATOR', 'w') as f:
             f.write(creatorCode)
+
+    def setComment(self, comment):
+        with open(self.rsrcPath + '.COMMENT', 'w') as f:
+            f.write(comment)
 
     def flatten(self):
         namedata = self.name.encode('utf-8')

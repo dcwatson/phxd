@@ -202,7 +202,9 @@ def handleFileMove(server, user, packet):
     if os.path.exists(newPath):
         raise HLException("The specified file already exists in the new location.")
 
-    os.rename(oldPath, newPath)
+    file = HLFile(oldPath)
+    file.rename(newPath)
+
     server.sendPacket(packet.response(), user)
 
 
@@ -225,6 +227,7 @@ def handleFileGetInfo(server, user, packet):
     info.addNumber(DATA_FILECREATOR, file.getCreator())
     info.addBinary(DATA_DATECREATED, HLEncodeDate(d))
     info.addBinary(DATA_DATEMODIFIED, HLEncodeDate(d))
+    info.addString(DATA_COMMENT, file.getComment())
     server.sendPacket(info, user)
 
 
@@ -233,6 +236,7 @@ def handleFileSetInfo(server, user, packet):
     dir = parseDir(packet.getBinary(DATA_DIR))
     oldName = packet.getString(DATA_FILENAME, "")
     newName = packet.getString(DATA_NEWFILE, oldName)
+    comment = packet.getString(DATA_COMMENT, "")
 
     if (oldName != newName) and (not user.hasPriv(PRIV_RENAME_FILES)):
         raise HLException("You cannot rename files.")
@@ -245,5 +249,8 @@ def handleFileSetInfo(server, user, packet):
     if (oldPath != newPath) and os.path.exists(newPath):
         raise HLException("The specified file already exists.")
 
-    os.rename(oldPath, newPath)
+    file = HLFile(oldPath)
+    file.rename(newPath)
+    file.setComment(comment)
+
     server.sendPacket(packet.response(), user)
