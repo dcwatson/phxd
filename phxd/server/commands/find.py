@@ -27,7 +27,7 @@ def handle(server, user, arg, ref):
             found = "\r > ".join(matches)
         matchStr = "\r > --- search results for '%s' ------------\r > %s" % (arg, found)
         chat = HLPacket(HTLS_HDR_CHAT)
-        chat.addString(DATA_STRING, matchStr)
+        chat.add_string(DATA_STRING, matchStr)
         if ref > 0:
-            chat.addInt32(DATA_CHATID, ref)
-        server.sendPacket(chat, user)
+            chat.add_number(DATA_CHATID, ref, bits=32)
+        server.send_packet(chat, user)

@@ -11,7 +11,7 @@ class Settings:
 
     def update(self, mod):
         for name in dir(mod):
-            if not name.startswith('_'):
+            if name == name.upper() and not name.startswith('_'):
                 self._vars[name] = getattr(mod, name)
 
 

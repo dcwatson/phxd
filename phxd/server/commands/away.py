@@ -9,4 +9,4 @@ def handle(server, user, args, ref):
     else:
         user.status &= ~STATUS_AWAY
     if user.status != oldStatus:
-        server.sendUserChange(user)
+        server.send_user_change(user)

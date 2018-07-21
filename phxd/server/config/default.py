@@ -19,6 +19,7 @@ LOG_LEVEL = logging.DEBUG
 # server configuration
 ################################################################################
 
+SERVER_BIND = '0.0.0.0'
 SERVER_PORTS = (5500,)
 SERVER_NAME = "my_phxd_server"
 IDLE_TIME = 10 * 60
@@ -95,3 +96,12 @@ XFER_TIMEOUT = 30.0
 ENABLE_GIF_ICONS = True
 MAX_GIF_SIZE = 32768
 DEFAULT_ICON_TIME = 10
+
+
+################################################################################
+# IRC server configuration
+################################################################################
+
+ENABLE_IRC = True
+IRC_PORT = 6667
+IRC_DEFAULT_ACCOUNT = 'guest'

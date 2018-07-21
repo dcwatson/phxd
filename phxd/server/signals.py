@@ -1,15 +1,21 @@
-packet_received = object()
-packet_outgoing = object()
+from blinker import signal
 
-client_connected = object()
-client_disconnected = object()
 
-transfer_started = object()
-transfer_completed = object()
-transfer_aborted = object()
+packet_received = signal('packet-received')
+packet_outgoing = signal('packet-outgoing')
 
-user_login = object()
-user_change = object()
-user_leave = object()
+# Specific signal where the sender is the packet type, not the server.
+packet_type_received = signal('packet-type-received')
 
-signal_reload = object()
+client_connected = signal('client-connected')
+client_disconnected = signal('client-disconnected')
+
+transfer_started = signal('transfer-started')
+transfer_completed = signal('transfer-completed')
+transfer_aborted = signal('transfer-aborted')
+
+user_login = signal('user-login')
+user_change = signal('user-change')
+user_leave = signal('user-leave')
+
+signal_reload = signal('reload')

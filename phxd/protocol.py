@@ -1,129 +1,150 @@
-from twisted.internet import reactor
-from twisted.internet.interfaces import IProducer
-from twisted.internet.protocol import Protocol
-from zope.interface import implementer
-
+from phxd.constants import HTLC_MAGIC_LEN, HTLS_MAGIC_LEN
 from phxd.packet import HLPacket
+from phxd.utils import HLClientMagic, HLServerMagic
 
 from struct import unpack
+import asyncio
 
 
-class HLProtocol(Protocol):
-    """ Protocol subclass to handle parsing and dispatching of raw hotline data. """
+class HLProtocol (asyncio.Protocol):
+    """
+    Protocol subclass to handle parsing and dispatching of raw hotline packet data.
+    """
 
-    context = None
-    timer = None
+    # Mostly for the server to associate a HLUser with this connection.
+    user = None
 
-    def __init__(self):
+    # Subclasses override these.
+    magic = None
+    expected_magic_length = None
+
+    def __init__(self, server):
+        self.server = server
         self.packet = HLPacket()
-        self.gotMagic = False
-        self.expectedMagicLen = 0
-        self.buffered = b""
+        self.got_magic = False
+        self.buffered = b''
+        self.transport = None
+        self.address = None
+        self.port = None
 
-    def connectionMade(self):
-        """ Called when a connection is accepted. """
-        self.factory.notifyConnect(self)
+    def connection_made(self, transport: asyncio.Transport):
+        self.transport = transport
+        self.address, self.port = self.transport.get_extra_info('peername')
+        self.server.notify_connect(self)
+        self.transport.write(self.magic)
 
-    def connectionLost(self, reason):
-        """ Called when the connection is lost. """
-        self.factory.notifyDisconnect(self)
+    def connection_lost(self, exc):
+        self.server.notify_disconnect(self)
 
-    def dataReceived(self, data):
-        """ Called when the socket receives data. """
+    def data_received(self, data: bytes):
         self.buffered += data
-        self.parseBuffer()
+        self.parse_buffer()
 
-    def parseBuffer(self):
-        """ Parses the current buffer until the buffer is empty or until no more packets can be parsed. """
-        if self.gotMagic:
+    def parse_buffer(self):
+        if self.got_magic:
             done = False
             while not done:
                 size = self.packet.parse(self.buffered)
                 if size > 0:
                     self.buffered = self.buffered[size:]
-                    self.factory.notifyPacket(self, self.packet)
+                    self.server.notify_packet(self, self.packet)
                     self.packet = HLPacket()
                 else:
                     done = True
         else:
-            if len(self.buffered) >= self.expectedMagicLen:
-                magic = self.buffered[0:self.expectedMagicLen]
-                self.buffered = self.buffered[self.expectedMagicLen:]
-                self.gotMagic = True
-                self.factory.notifyMagic(self, magic)
+            if len(self.buffered) >= self.expected_magic_length:
+                magic = self.buffered[:self.expected_magic_length]
+                self.buffered = self.buffered[self.expected_magic_length:]
+                self.got_magic = True
+                self.server.notify_magic(self, magic)
                 if len(self.buffered) > 0:
-                    self.parseBuffer()
+                    self.parse_buffer()
 
-    def waitForMagic(self, magicLen):
-        self.expectedMagicLen = magicLen
-
-    def writeMagic(self, magic):
-        self.transport.write(magic)
-
-    def writePacket(self, packet):
-        """ Flattens and writes a packet out to the socket. """
+    def write_packet(self, packet):
         self.transport.write(packet.flatten())
 
 
-@implementer(IProducer)
-class HLTransferProtocol(Protocol):
+class HLServerProtocol (HLProtocol):
+    magic = HLServerMagic()
+    expected_magic_length = HTLC_MAGIC_LEN
 
-    info = None
-    gotMagic = False
-    buffered = b""
 
-    def connectionMade(self):
-        self.factory.notifyConnect(self)
+class HLClientProtocol (HLProtocol):
+    magic = HLClientMagic()
+    expected_magic_length = HTLS_MAGIC_LEN
 
-    def connectionLost(self, reason):
-        if self.info:
-            self.info.finish()
-        self.factory.notifyDisconnect(self)
 
-    def start(self, transferInfo, sendMagic=False):
+class HLTransferProtocol (asyncio.Protocol):
+
+    transfer = None
+
+    def __init__(self, server):
+        self.server = server
+        self.got_magic = False
+        self.buffered = b''
+        self.transport = None
+        self.address = None
+        self.port = None
+        self.paused = False
+
+    def connection_made(self, transport: asyncio.Transport):
+        self.transport = transport
+        self.address, self.port = self.transport.get_extra_info('peername')
+        self.server.transfer_connect(self)
+
+    def connection_lost(self, exc):
+        if self.transfer:
+            self.transfer.finish()
+        self.server.transfer_disconnect(self)
+
+    def data_received(self, data: bytes):
+        self.buffered += data
+        self.parse_buffer()
+
+    def start(self, transfer, send_magic=False):
         """ This should be called after magic has been received. transferInfo should be a HLTransfer instance. """
-        self.info = transferInfo
-        if not self.info.isIncoming():
-            self.transport.registerProducer(self, False)
-        self.info.start()
-        reactor.callLater(0, self.parseBuffer)
+        self.transfer = transfer
+        self.transfer.start()
+        if self.transfer.incoming:
+            self.server.loop.call_later(0.0, self.parse_buffer)
+        else:
+            self.resume_writing()
 
-    def parseBuffer(self):
+    def parse_buffer(self):
         if len(self.buffered) < 1:
             return
-        if self.gotMagic:
-            if self.info and self.info.isIncoming():
-                self.info.parseData(self.buffered)
-                self.buffered = b""
-                if self.info.isComplete():
+        if self.got_magic:
+            if self.transfer and self.transfer.incoming:
+                self.transfer.parse_data(self.buffered)
+                self.buffered = b''
+                if self.transfer.is_complete():
                     # The upload is done, it's our job to close the connection.
-                    self.transport.loseConnection()
+                    self.transport.close()
             else:
-                self.transport.loseConnection()
+                print("got non-magic data for a download")
+                self.transport.close()
         else:
             # Make sure we buffer at this point in case we don't get the
             # HTXF magic all at once, or get more than just the magic.
             if len(self.buffered) >= 16:
                 # We got the HTXF magic, parse it.
-                (proto, xfid, size, flags) = unpack("!4L", self.buffered[0:16])
+                proto, xfid, size, flags = unpack("!4L", self.buffered[0:16])
                 self.buffered = self.buffered[16:]
-                self.gotMagic = True
-                self.factory.notifyMagic(self, xfid, size, flags)
+                self.got_magic = True
+                self.server.transfer_magic(self, xfid, size, flags)
 
-    def dataReceived(self, data):
-        self.buffered += data
-        self.parseBuffer()
-
-    def resumeProducing(self):
-        """ The transport asked us for more data. Should only happen for downloads after we've been registered as a producer. """
-        chunk = self.info.getDataChunk()
+    def write_loop(self):
+        if self.transport.is_closing():
+            return
+        chunk = self.transfer.next_chunk()
         if len(chunk) > 0:
             self.transport.write(chunk)
-        else:
-            self.transport.unregisterProducer()
+            if not self.paused:
+                self.server.loop.call_later(0.0, self.write_loop)
 
-    def pauseProducing(self):
-        pass
+    def pause_writing(self):
+        self.paused = True
 
-    def stopProducing(self):
-        pass
+    def resume_writing(self):
+        self.paused = False
+        self.server.loop.call_later(0.0, self.write_loop)

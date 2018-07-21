@@ -2,7 +2,7 @@ from phxd.server.config import conf
 from phxd.types import HLException
 
 
-def certifyIcon(data):
+def verify_icon(data):
     if len(data) > conf.MAX_GIF_SIZE:
         raise HLException("GIF icon too large.")
         return False

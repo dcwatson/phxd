@@ -1,9 +1,7 @@
-from pydispatch import dispatcher
-
 from phxd.constants import *
 from phxd.server.config import conf
-from phxd.server.decorators import *
-from phxd.server.signals import *
+from phxd.server.decorators import packet_filter
+from phxd.server.signals import user_change, user_leave, user_login
 
 import codecs
 import os
@@ -65,43 +63,43 @@ chatlog = ChatLog(conf.LOG_DIR)
 
 
 def install():
-    dispatcher.connect(logUserJoin, signal=user_login)
-    dispatcher.connect(logUserChange, signal=user_change)
-    dispatcher.connect(logUserLeave, signal=user_leave)
+    user_login.connect(log_user_join)
+    user_change.connect(log_user_change)
+    user_leave.connect(log_user_leave)
 
 
 def uninstall():
-    dispatcher.disconnect(logUserJoin, signal=user_login)
-    dispatcher.disconnect(logUserChange, signal=user_change)
-    dispatcher.disconnect(logUserLeave, signal=user_leave)
+    user_login.disconnect(log_user_join)
+    user_change.disconnect(log_user_change)
+    user_leave.disconnect(log_user_leave)
     if chatlog.logfile:
         chatlog.logfile.close()
 
 
 @packet_filter(HTLS_HDR_CHAT)
 def logChat(server, packet, users):
-    private = packet.getNumber(DATA_CHATID, 0) > 0
-    user = server.getUser(packet.getNumber(DATA_UID))
+    private = packet.number(DATA_CHATID, 0) > 0
+    user = server.get_user(packet.number(DATA_UID))
     if conf.LOG_CHAT and user is not None and not private:
-        line = packet.getString(DATA_STRING)
-        prefix = packet.getNumber(DATA_OFFSET, 0)
-        emote = packet.getNumber(DATA_OPTION, 0) > 0
+        line = packet.string(DATA_STRING)
+        prefix = packet.number(DATA_OFFSET, 0)
+        emote = packet.number(DATA_OPTION, 0) > 0
         if emote:
             chatlog.emote(user, line[prefix:])
         else:
             chatlog.chat(user, line[prefix:])
 
 
-def logUserJoin(server, user):
+def log_user_join(user, server):
     if conf.LOG_CHAT:
         chatlog.join(user)
 
 
-def logUserChange(server, user, oldNick):
-    if conf.LOG_CHAT and (user.nick != oldNick):
-        chatlog.change(user, oldNick)
+def log_user_change(user, server, old_nick):
+    if conf.LOG_CHAT and (user.nick != old_nick):
+        chatlog.change(user, old_nick)
 
 
-def logUserLeave(server, user):
+def log_user_leave(user, server):
     if conf.LOG_CHAT:
         chatlog.leave(user)

@@ -42,7 +42,7 @@ class ClientWrapper:
         self.screen.addLine('*** login successful')
 
     def _chat(self, packet):
-        line = packet.getString(DATA_STRING, None)
+        line = packet.string(DATA_STRING, None)
         if line is not None:
             self.screen.addLine(line.replace('\r', '').replace('\n', ''))
 

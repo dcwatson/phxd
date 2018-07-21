@@ -31,8 +31,8 @@ class HLClient (ClientFactory):
         self._nickname = n
         if self.connection is not None:
             p = HLPacket(HTLC_HDR_USER_CHANGE)
-            p.addString(DATA_NICK, self._nickname)
-            self.sendPacket(p)
+            p.add_string(DATA_NICK, self._nickname)
+            self.send_packet(p)
 
     nickname = property(_getNick, _setNick)
 
@@ -56,7 +56,7 @@ class HLClient (ClientFactory):
         if packet.seq in self.tasks:
             self.tasks[packet.seq].callback(packet)
             del self.tasks[packet.seq]
-        # Fire off any signals passed into sendPacket for a given packet sequence
+        # Fire off any signals passed into send_packet for a given packet sequence
         if packet.seq in self.seq_signals:
             dispatcher.send(signal=self.seq_signals[packet.seq], sender=self, packet=packet, client=self)
             del self.seq_signals[packet.seq]
@@ -76,7 +76,7 @@ class HLClient (ClientFactory):
 
     # Basic hotline functionality
 
-    def sendPacket(self, packet, signal=None):
+    def send_packet(self, packet, signal=None):
         if self.connection is not None:
             if signal and (packet.seq > 0):
                 self.seq_signals[packet.seq] = signal
@@ -84,32 +84,32 @@ class HLClient (ClientFactory):
 
     def sendLogin(self, login, passwd):
         p = HLPacket(HTLC_HDR_LOGIN, self.nextTaskID())
-        p.addBinary(DATA_LOGIN, HLEncode(login))
-        p.addBinary(DATA_PASSWORD, HLEncode(passwd))
-        p.addString(DATA_NICK, self.nickname)
-        self.sendPacket(p, login_received)
+        p.add(DATA_LOGIN, HLEncode(login))
+        p.add(DATA_PASSWORD, HLEncode(passwd))
+        p.add_string(DATA_NICK, self.nickname)
+        self.send_packet(p, login_received)
         return self.taskDeferred()
 
     def sendChange(self, nick):
         p = HLPacket(HTLC_HDR_USER_CHANGE)
-        p.addString(DATA_NICK, nick)
-        self.sendPacket(p)
+        p.add_string(DATA_NICK, nick)
+        self.send_packet(p)
 
     def sendChat(self, chat):
         if chat:
             p = HLPacket(HTLC_HDR_CHAT)
-            p.addString(DATA_STRING, chat)
-            self.sendPacket(p)
+            p.add_string(DATA_STRING, chat)
+            self.send_packet(p)
 
     def sendIcon(self, icon):
         if icon:
             p = HLPacket(HTLC_HDR_ICON_SET)
-            p.addBinary(DATA_GIFICON, icon)
-            self.sendPacket(p)
+            p.add(DATA_GIFICON, icon)
+            self.send_packet(p)
 
     def sendMessage(self, msg, to):
         p = HLPacket(HTLC_HDR_MSG, self.nextTaskID())
-        p.addString(DATA_STRING, msg)
-        p.addNumber(DATA_UID, to)
-        self.sendPacket(p)
+        p.add_string(DATA_STRING, msg)
+        p.add_number(DATA_UID, to)
+        self.send_packet(p)
         return self.taskDeferred()

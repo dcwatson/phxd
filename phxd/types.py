@@ -33,7 +33,7 @@ class HLAccount (object):
     def __str__(self):
         return "<HLAccount '%s'>" % self.login
 
-    def hasPriv(self, priv):
+    def has_perm(self, priv):
         return ((int(self.privs) & priv) > 0)
 
 
@@ -74,14 +74,14 @@ class HLUser:
         self.color = -1
         self.account = None
         self.away = False
-        self.lastPacketTime = 0.0
+        self.last_packet_time = 0.0
         self.valid = False
 
     def _getNick(self):
         return self._nick
 
     def _setNick(self, n):
-        self._nick = re.sub(r'[:<>]', '', n)
+        self._nick = re.sub(r'[:<> ]', '', n)
     nick = property(_getNick, _setNick)
 
     def __str__(self):
@@ -90,9 +90,14 @@ class HLUser:
             rep = rep + self.account.login
         return rep + ">"
 
-    def hasPriv(self, priv):
+    @property
+    def ident(self):
+        username = self.account.login if self.account else 'guest'
+        return '{}!{}@{}'.format(self.nick, username, self.ip)
+
+    def has_perm(self, perm):
         """ Returns True if the account associated with the user has the specified privilege. """
-        return self.account and self.account.hasPriv(priv)
+        return self.account and self.account.has_perm(perm)
 
     def parse(self, data):
         if len(data) < 8:

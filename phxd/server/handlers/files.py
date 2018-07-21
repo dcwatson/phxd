@@ -1,13 +1,10 @@
-from pydispatch import dispatcher
-from twisted.internet import utils
-
 from phxd.constants import *
 from phxd.permissions import *
 from phxd.server.config import conf
-from phxd.server.decorators import *
-from phxd.server.signals import *
+from phxd.server.decorators import packet_handler, require_permission
+from phxd.server.signals import transfer_completed
 from phxd.types import HLException, HLFile, HLResumeData
-from phxd.utils import HLEncodeDate, decodeString
+from phxd.utils import HLEncodeDate, decode_string
 
 from datetime import datetime
 from struct import unpack
@@ -15,26 +12,26 @@ import os
 
 
 def install():
-    dispatcher.connect(handleTransferFinished, signal=transfer_completed)
+    transfer_completed.connect(handle_transfer_finished)
 
 
 def uninstall():
-    dispatcher.disconnect(handleTransferFinished, signal=transfer_completed)
+    transfer_completed.disconnect(handle_transfer_finished)
 
 
-def handleTransferFinished(server, transfer):
-    if transfer.isIncoming() and transfer.isComplete():
+def handle_transfer_finished(server, transfer):
+    if transfer.incoming and transfer.is_complete():
         if conf.UPLOAD_SCRIPT:
-            user = server.getUser(transfer.owner)
             pargs = [
                 transfer.file.dataPath,
             ]
             environ = {
-                'USER_LOGIN': str(user.account.login),
-                'USER_NICK': str(user.nick),
-                'USER_IPADDR': str(user.ip),
+                'USER_LOGIN': str(transfer.owner.account.login),
+                'USER_NICK': str(transfer.owner.nick),
+                'USER_IPADDR': str(transfer.owner.ip),
             }
-            utils.getProcessOutput(conf.UPLOAD_SCRIPT, args=pargs, env=environ)
+            print(conf.UPLOAD_SCRIPT, pargs, environ)
+            # utils.getProcessOutput(conf.UPLOAD_SCRIPT, args=pargs, env=environ)
 
 
 def parseDir(d):
@@ -47,7 +44,7 @@ def parseDir(d):
     while (pos < len(d)) and (count > 0):
         size = unpack("!H", d[pos:pos + 2])[0]
         pos += 2
-        parts.append(decodeString(d[pos:pos + size]))
+        parts.append(decode_string(d[pos:pos + size]))
         pos += size + 1
         count -= 1
     return parts
@@ -73,14 +70,14 @@ def buildPath(root, d, file=None):
 
 @packet_handler(HTLC_HDR_FILE_LIST)
 def handleFileList(server, user, packet):
-    dir = parseDir(packet.getBinary(DATA_DIR))
+    dir = parseDir(packet.binary(DATA_DIR))
     path = buildPath(user.account.fileRoot, dir)
 
     if not os.path.exists(path):
         raise HLException("The specified directory does not exist.")
     if not os.path.isdir(path):
         raise HLException("The specified path is not a directory.")
-    if (not user.hasPriv(PRIV_VIEW_DROPBOXES)) and (path.upper().find("DROP BOX") >= 0):
+    if (not user.has_perm(PERM_VIEW_DROPBOXES)) and (path.upper().find("DROP BOX") >= 0):
         raise HLException("You are not allowed to view drop boxes.")
 
     reply = packet.response()
@@ -90,45 +87,45 @@ def handleFileList(server, user, packet):
         if conf.SHOW_DOTFILES or (fname[0] != '.'):
             # Only list files starting with . if SHOW_DOTFILES is True.
             file = HLFile(os.path.join(path, fname))
-            reply.addBinary(DATA_FILE, file.flatten())
-    server.sendPacket(reply, user)
+            reply.add(DATA_FILE, file.flatten())
+    server.send_packet(reply, user)
 
 
 @packet_handler(HTLC_HDR_FILE_GET)
-@require_permission(PRIV_DOWNLOAD_FILES, "download files")
+@require_permission(PERM_DOWNLOAD_FILES, "download files")
 def handleFileDownload(server, user, packet):
-    dir = parseDir(packet.getBinary(DATA_DIR))
-    name = packet.getString(DATA_FILENAME, "")
-    resume = HLResumeData(packet.getBinary(DATA_RESUME))
-    # options = packet.getNumber(DATA_XFEROPTIONS, 0)
+    dir = parseDir(packet.binary(DATA_DIR))
+    name = packet.string(DATA_FILENAME, "")
+    resume = HLResumeData(packet.binary(DATA_RESUME))
+    # options = packet.number(DATA_XFEROPTIONS, 0)
 
     path = buildPath(user.account.fileRoot, dir, name)
     if not os.path.exists(path):
         raise HLException("Specified file does not exist.")
 
     file = HLFile(path)
-    xfer = server.fileserver.addDownload(user, file, resume)
+    xfer = server.add_download(user, file, resume)
     dataSize = file.size() - resume.totalOffset()
 
     reply = packet.response()
-    reply.addNumber(DATA_XFERSIZE, xfer.total)
-    reply.addNumber(DATA_FILESIZE, dataSize)
-    reply.addNumber(DATA_XFERID, xfer.id)
-    server.sendPacket(reply, user)
+    reply.add_number(DATA_XFERSIZE, xfer.total)
+    reply.add_number(DATA_FILESIZE, dataSize)
+    reply.add_number(DATA_XFERID, xfer.id)
+    server.send_packet(reply, user)
 
 
 @packet_handler(HTLC_HDR_FILE_PUT)
-@require_permission(PRIV_UPLOAD_FILES, "upload files")
+@require_permission(PERM_UPLOAD_FILES, "upload files")
 def handleFileUpload(server, user, packet):
-    dir = parseDir(packet.getBinary(DATA_DIR))
-    name = packet.getString(DATA_FILENAME, "")
-    size = packet.getNumber(DATA_XFERSIZE, 0)
-    # options = packet.getNumber(DATA_XFEROPTIONS, 0)
+    dir = parseDir(packet.binary(DATA_DIR))
+    name = packet.string(DATA_FILENAME, "")
+    size = packet.number(DATA_XFERSIZE, 0)
+    # options = packet.number(DATA_XFEROPTIONS, 0)
 
     path = buildPath(user.account.fileRoot, dir, name)
     if os.path.exists(path):
         raise HLException("File already exists.")
-    if (not user.hasPriv(PRIV_UPLOAD_ANYWHERE)) and (path.upper().find("UPLOAD") < 0 or path.upper().find("DROP BOX") < 0):
+    if (not user.has_perm(PERM_UPLOAD_ANYWHERE)) and (path.upper().find("UPLOAD") < 0 or path.upper().find("DROP BOX") < 0):
         raise HLException("You must upload to an upload directory or drop box.")
 
     # Make sure we have enough disk space to accept the file.
@@ -139,25 +136,25 @@ def handleFileUpload(server, user, packet):
         raise HLException("Insufficient disk space.")
 
     file = HLFile(path)
-    xfer = server.fileserver.addUpload(user, file)
+    xfer = server.add_upload(user, file)
     xfer.total = size
 
     reply = packet.response()
-    reply.addNumber(DATA_XFERID, xfer.id)
+    reply.add_number(DATA_XFERID, xfer.id)
     if file.exists():
-        reply.addBinary(DATA_RESUME, file.resumeData().flatten())
-    server.sendPacket(reply, user)
+        reply.add(DATA_RESUME, file.resumeData().flatten())
+    server.send_packet(reply, user)
 
 
 @packet_handler(HTLC_HDR_FILE_DELETE)
 def handleFileDelete(server, user, packet):
-    dir = parseDir(packet.getBinary(DATA_DIR))
-    name = packet.getString(DATA_FILENAME, "")
+    dir = parseDir(packet.binary(DATA_DIR))
+    name = packet.string(DATA_FILENAME, "")
     path = buildPath(user.account.fileRoot, dir, name)
     if not os.path.exists(path):
         raise HLException("Specified file or directory does not exist.")
     if os.path.isdir(path):
-        if not user.hasPriv(PRIV_DELETE_FOLDERS):
+        if not user.has_perm(PERM_DELETE_FOLDERS):
             raise HLException("You are not allowed to delete folders.")
         # First, recursively delete everything inside the directory.
         for (root, dirs, files) in os.walk(path, topdown=False):
@@ -168,31 +165,31 @@ def handleFileDelete(server, user, packet):
         # Then delete the directory itself.
         os.rmdir(path)
     else:
-        if not user.hasPriv(PRIV_DELETE_FILES):
+        if not user.has_perm(PERM_DELETE_FILES):
             raise HLException("You are not allowed to delete files.")
         file = HLFile(path)
         file.delete()
-    server.sendPacket(packet.response(), user)
+    server.send_packet(packet.response(), user)
 
 
 @packet_handler(HTLC_HDR_FILE_MKDIR)
-@require_permission(PRIV_CREATE_FOLDERS, "create folders")
+@require_permission(PERM_CREATE_FOLDERS, "create folders")
 def handleFolderCreate(server, user, packet):
-    dir = parseDir(packet.getBinary(DATA_DIR))
-    name = packet.getString(DATA_FILENAME, "")
+    dir = parseDir(packet.binary(DATA_DIR))
+    name = packet.string(DATA_FILENAME, "")
     path = buildPath(user.account.fileRoot, dir, name)
     if os.path.exists(path):
         raise HLException("Specified directory already exists.")
     os.mkdir(path, conf.DIR_UMASK)
-    server.sendPacket(packet.response(), user)
+    server.send_packet(packet.response(), user)
 
 
 @packet_handler(HTLC_HDR_FILE_MOVE)
-@require_permission(PRIV_MOVE_FILES, "move files")
+@require_permission(PERM_MOVE_FILES, "move files")
 def handleFileMove(server, user, packet):
-    oldDir = parseDir(packet.getBinary(DATA_DIR))
-    newDir = parseDir(packet.getBinary(DATA_NEWDIR))
-    name = packet.getString(DATA_FILENAME, "")
+    oldDir = parseDir(packet.binary(DATA_DIR))
+    newDir = parseDir(packet.binary(DATA_NEWDIR))
+    name = packet.string(DATA_FILENAME, "")
 
     oldPath = buildPath(user.account.fileRoot, oldDir, name)
     newPath = buildPath(user.account.fileRoot, newDir, name)
@@ -205,13 +202,13 @@ def handleFileMove(server, user, packet):
     file = HLFile(oldPath)
     file.rename(newPath)
 
-    server.sendPacket(packet.response(), user)
+    server.send_packet(packet.response(), user)
 
 
 @packet_handler(HTLC_HDR_FILE_GETINFO)
 def handleFileGetInfo(server, user, packet):
-    dir = parseDir(packet.getBinary(DATA_DIR))
-    name = packet.getString(DATA_FILENAME, b"")
+    dir = parseDir(packet.binary(DATA_DIR))
+    name = packet.string(DATA_FILENAME, b"")
 
     path = buildPath(user.account.fileRoot, dir, name)
     if not os.path.exists(path):
@@ -221,24 +218,24 @@ def handleFileGetInfo(server, user, packet):
     d = datetime.fromtimestamp(os.path.getmtime(path))
 
     info = packet.response()
-    info.addString(DATA_FILENAME, name)
-    info.addNumber(DATA_FILESIZE, file.size())
-    info.addNumber(DATA_FILETYPE, file.getType())
-    info.addNumber(DATA_FILECREATOR, file.getCreator())
-    info.addBinary(DATA_DATECREATED, HLEncodeDate(d))
-    info.addBinary(DATA_DATEMODIFIED, HLEncodeDate(d))
-    info.addString(DATA_COMMENT, file.getComment())
-    server.sendPacket(info, user)
+    info.add_string(DATA_FILENAME, name)
+    info.add_number(DATA_FILESIZE, file.size())
+    info.add_number(DATA_FILETYPE, file.getType())
+    info.add_number(DATA_FILECREATOR, file.getCreator())
+    info.add(DATA_DATECREATED, HLEncodeDate(d))
+    info.add(DATA_DATEMODIFIED, HLEncodeDate(d))
+    info.add_string(DATA_COMMENT, file.getComment())
+    server.send_packet(info, user)
 
 
 @packet_handler(HTLC_HDR_FILE_SETINFO)
 def handleFileSetInfo(server, user, packet):
-    dir = parseDir(packet.getBinary(DATA_DIR))
-    oldName = packet.getString(DATA_FILENAME, "")
-    newName = packet.getString(DATA_NEWFILE, oldName)
-    comment = packet.getString(DATA_COMMENT, "")
+    dir = parseDir(packet.binary(DATA_DIR))
+    oldName = packet.string(DATA_FILENAME, "")
+    newName = packet.string(DATA_NEWFILE, oldName)
+    comment = packet.string(DATA_COMMENT, "")
 
-    if (oldName != newName) and (not user.hasPriv(PRIV_RENAME_FILES)):
+    if (oldName != newName) and (not user.has_perm(PERM_RENAME_FILES)):
         raise HLException("You cannot rename files.")
 
     oldPath = buildPath(user.account.fileRoot, dir, oldName)
@@ -253,4 +250,4 @@ def handleFileSetInfo(server, user, packet):
     file.rename(newPath)
     file.setComment(comment)
 
-    server.sendPacket(packet.response(), user)
+    server.send_packet(packet.response(), user)

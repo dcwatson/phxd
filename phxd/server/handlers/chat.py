@@ -1,11 +1,9 @@
-from pydispatch import dispatcher
-
 from phxd.constants import *
 from phxd.packet import HLPacket
-from phxd.permissions import *
+from phxd.permissions import PERM_CREATE_CHATS, PERM_READ_CHAT, PERM_SEND_CHAT
 from phxd.server.config import conf
-from phxd.server.decorators import *
-from phxd.server.signals import *
+from phxd.server.decorators import packet_handler, require_permission
+from phxd.server.signals import client_disconnected
 from phxd.types import HLException
 
 import logging
@@ -13,11 +11,11 @@ import sys
 
 
 def install():
-    dispatcher.connect(handleUserDisconnected, signal=client_disconnected)
+    client_disconnected.connect(handle_user_disconnected)
 
 
 def uninstall():
-    dispatcher.disconnect(handleUserDisconnected, signal=client_disconnected)
+    client_disconnected.disconnect(handle_user_disconnected)
 
 
 def _dispatchCommand(server, user, line, ref):
@@ -41,7 +39,7 @@ def _dispatchCommand(server, user, line, ref):
     return False
 
 
-def handleUserDisconnected(server, user):
+def handle_user_disconnected(conn, server, user):
     deadChats = []
     # go through all the private chats removing this user
     # keep a list of dead chats to remove them all at once
@@ -53,26 +51,26 @@ def handleUserDisconnected(server, user):
             if len(chat.users) > 0:
                 # Send a chat leave to everyone left in the chat.
                 leave = HLPacket(HTLS_HDR_CHAT_USER_LEAVE)
-                leave.addInt32(DATA_CHATID, chat.id)
-                leave.addNumber(DATA_UID, user.uid)
+                leave.add_number(DATA_CHATID, chat.id, bits=32)
+                leave.add_number(DATA_UID, user.uid)
                 for u in chat.users:
-                    server.sendPacket(leave, u)
+                    server.send_packet(leave, u)
             else:
                 # Otherwise, mark the chat as dead.
                 deadChats.append(chat.id)
     # Now we can remove all the dead chats without modifying the list we were iterating through.
     for dead in deadChats:
-        server.removeChat(dead)
+        server.remove_chat(dead)
 
 
 @packet_handler(HTLC_HDR_CHAT)
 def handleChat(server, user, packet):
-    str = packet.getString(DATA_STRING, "")
-    opt = packet.getNumber(DATA_OPTION, 0)
-    ref = packet.getNumber(DATA_CHATID, 0)
-    pchat = server.getChat(ref)
+    str = packet.string(DATA_STRING, "")
+    opt = packet.number(DATA_OPTION, 0)
+    ref = packet.number(DATA_CHATID, 0)
+    pchat = server.get_chat(ref)
 
-    if user.hasPriv(PRIV_SEND_CHAT) and (len(str.strip()) > 0):
+    if user.has_perm(PERM_SEND_CHAT) and (len(str.strip()) > 0):
         str = str.replace("\n", "\r")
         lines = str.split("\r")
         format = conf.CHAT_FORMAT
@@ -87,42 +85,42 @@ def handleChat(server, user, packet):
             if (len(line.strip()) > 0) and (not _dispatchCommand(server, user, line, ref)):
                 f_str = format % (user.nick, line)
                 chat = HLPacket(HTLS_HDR_CHAT)
-                chat.addNumber(DATA_UID, user.uid)
-                chat.addNumber(DATA_OFFSET, prefix)
-                chat.addString(DATA_STRING, f_str)
+                chat.add_number(DATA_UID, user.uid)
+                chat.add_number(DATA_OFFSET, prefix)
+                chat.add_string(DATA_STRING, f_str)
                 if opt > 0:
-                    chat.addNumber(DATA_OPTION, opt)
+                    chat.add_number(DATA_OPTION, opt)
                 if pchat is not None:
                     # If this is meant for a private chat, add the chat ID
                     # and send it to everyone in the chat.
-                    chat.addInt32(DATA_CHATID, pchat.id)
+                    chat.add_number(DATA_CHATID, pchat.id, bits=32)
                     for u in pchat.users:
-                        server.sendPacket(chat, u)
+                        server.send_packet(chat, u)
                 else:
                     # Otherwise, send it to public chat (and log it).
-                    server.sendPacket(chat, lambda c: c.context.hasPriv(PRIV_READ_CHAT))
+                    server.send_packet(chat, lambda c: c.user.has_perm(PERM_READ_CHAT))
 
 
 @packet_handler(HTLC_HDR_CHAT_CREATE)
-@require_permission(PRIV_CREATE_CHATS, "create private chats")
+@require_permission(PERM_CREATE_CHATS, "create private chats")
 def handleChatCreate(server, user, packet):
-    uid = packet.getNumber(DATA_UID, 0)
-    who = server.getUser(uid)
+    uid = packet.number(DATA_UID, 0)
+    who = server.get_user(uid)
 
     # First, create the new chat, adding the user.
-    chat = server.createChat()
+    chat = server.create_chat()
     chat.addUser(user)
 
     # Send the completed task with user info.
     reply = packet.response()
-    reply.addInt32(DATA_CHATID, chat.id)
-    reply.addNumber(DATA_UID, user.uid)
-    reply.addString(DATA_NICK, user.nick)
-    reply.addNumber(DATA_ICON, user.icon)
-    reply.addNumber(DATA_STATUS, user.status)
+    reply.add_number(DATA_CHATID, chat.id, bits=32)
+    reply.add_number(DATA_UID, user.uid)
+    reply.add_string(DATA_NICK, user.nick)
+    reply.add_number(DATA_ICON, user.icon)
+    reply.add_number(DATA_STATUS, user.status)
     if user.color >= 0:
-        reply.addInt32(DATA_COLOR, user.color)
-    server.sendPacket(reply, user)
+        reply.add_number(DATA_COLOR, user.color, bits=32)
+    server.send_packet(reply, user)
 
     if who and (who.uid != user.uid):
         # Add the specified user to the invite list.
@@ -130,18 +128,18 @@ def handleChatCreate(server, user, packet):
 
         # Invite the specified user to the newly created chat.
         invite = HLPacket(HTLS_HDR_CHAT_INVITE)
-        invite.addInt32(DATA_CHATID, chat.id)
-        invite.addNumber(DATA_UID, user.uid)
-        invite.addString(DATA_NICK, user.nick)
-        server.sendPacket(invite, who)
+        invite.add_number(DATA_CHATID, chat.id, bits=32)
+        invite.add_number(DATA_UID, user.uid)
+        invite.add_string(DATA_NICK, user.nick)
+        server.send_packet(invite, who)
 
 
 @packet_handler(HTLC_HDR_CHAT_INVITE)
 def handleChatInvite(server, user, packet):
-    ref = packet.getNumber(DATA_CHATID, 0)
-    uid = packet.getNumber(DATA_UID, 0)
-    chat = server.getChat(ref)
-    who = server.getUser(uid)
+    ref = packet.number(DATA_CHATID, 0)
+    uid = packet.number(DATA_UID, 0)
+    chat = server.get_chat(ref)
+    who = server.get_user(uid)
 
     if not who:
         raise HLException("Invalid user.")
@@ -163,30 +161,30 @@ def handleChatInvite(server, user, packet):
 
     # Send the invitation to the specified user.
     invite = HLPacket(HTLS_HDR_CHAT_INVITE)
-    invite.addInt32(DATA_CHATID, chat.id)
-    invite.addNumber(DATA_UID, user.uid)
-    invite.addString(DATA_NICK, user.nick)
-    server.sendPacket(invite, who)
+    invite.add_number(DATA_CHATID, chat.id, bits=32)
+    invite.add_number(DATA_UID, user.uid)
+    invite.add_string(DATA_NICK, user.nick)
+    server.send_packet(invite, who)
 
 
 @packet_handler(HTLC_HDR_CHAT_DECLINE)
 def handleChatDecline(server, user, packet):
-    ref = packet.getNumber(DATA_CHATID, 0)
-    chat = server.getChat(ref)
+    ref = packet.number(DATA_CHATID, 0)
+    chat = server.get_chat(ref)
     if chat and chat.hasInvite(user):
         chat.removeInvite(user)
         s = "\r< %s has declined the invitation to chat >" % user.nick
         decline = HLPacket(HTLS_HDR_CHAT)
-        decline.addInt32(DATA_CHATID, chat.id)
-        decline.addString(DATA_STRING, s)
+        decline.add_number(DATA_CHATID, chat.id, bits=32)
+        decline.add_string(DATA_STRING, s)
         for u in chat.users:
-            server.sendPacket(decline, u)
+            server.send_packet(decline, u)
 
 
 @packet_handler(HTLC_HDR_CHAT_JOIN)
 def handleChatJoin(server, user, packet):
-    ref = packet.getNumber(DATA_CHATID, 0)
-    chat = server.getChat(ref)
+    ref = packet.number(DATA_CHATID, 0)
+    chat = server.get_chat(ref)
 
     if not chat:
         raise HLException("Invalid chat.")
@@ -195,15 +193,15 @@ def handleChatJoin(server, user, packet):
 
     # Send a join packet to everyone in the chat.
     join = HLPacket(HTLS_HDR_CHAT_USER_CHANGE)
-    join.addInt32(DATA_CHATID, chat.id)
-    join.addNumber(DATA_UID, user.uid)
-    join.addString(DATA_NICK, user.nick)
-    join.addNumber(DATA_ICON, user.icon)
-    join.addNumber(DATA_STATUS, user.status)
+    join.add_number(DATA_CHATID, chat.id, bits=32)
+    join.add_number(DATA_UID, user.uid)
+    join.add_string(DATA_NICK, user.nick)
+    join.add_number(DATA_ICON, user.icon)
+    join.add_number(DATA_STATUS, user.status)
     if user.color >= 0:
-        join.addInt32(DATA_COLOR, user.color)
+        join.add_number(DATA_COLOR, user.color, bits=32)
     for u in chat.users:
-        server.sendPacket(join, u)
+        server.send_packet(join, u)
 
     # Add the joiner to the chat.
     chat.addUser(user)
@@ -212,15 +210,15 @@ def handleChatJoin(server, user, packet):
     # Send the userlist back to the joiner.
     list = packet.response()
     for u in chat.users:
-        list.addBinary(DATA_USER, u.flatten())
-    list.addString(DATA_SUBJECT, chat.subject)
-    server.sendPacket(list, user)
+        list.add(DATA_USER, u.flatten())
+    list.add_string(DATA_SUBJECT, chat.subject)
+    server.send_packet(list, user)
 
 
 @packet_handler(HTLC_HDR_CHAT_LEAVE)
 def handleChatLeave(server, user, packet):
-    ref = packet.getNumber(DATA_CHATID, 0)
-    chat = server.getChat(ref)
+    ref = packet.number(DATA_CHATID, 0)
+    chat = server.get_chat(ref)
 
     if not chat or not chat.hasUser(user):
         return
@@ -228,25 +226,25 @@ def handleChatLeave(server, user, packet):
     chat.removeUser(user)
     if len(chat.users) > 0:
         leave = HLPacket(HTLS_HDR_CHAT_USER_LEAVE)
-        leave.addInt32(DATA_CHATID, chat.id)
-        leave.addNumber(DATA_UID, user.uid)
+        leave.add_number(DATA_CHATID, chat.id, bits=32)
+        leave.add_number(DATA_UID, user.uid)
         for u in chat.users:
-            server.sendPacket(leave, u)
+            server.send_packet(leave, u)
     else:
-        server.removeChat(chat.id)
+        server.remove_chat(chat.id)
 
 
 @packet_handler(HTLC_HDR_CHAT_SUBJECT)
 def handleChatSubject(server, user, packet):
-    ref = packet.getNumber(DATA_CHATID, 0)
-    sub = packet.getString(DATA_SUBJECT, "")
-    chat = server.getChat(ref)
+    ref = packet.number(DATA_CHATID, 0)
+    sub = packet.string(DATA_SUBJECT, "")
+    chat = server.get_chat(ref)
 
     if not chat:
         return
 
     subject = HLPacket(HTLS_HDR_CHAT_SUBJECT)
-    subject.addInt32(DATA_CHATID, ref)
-    subject.addString(DATA_SUBJECT, sub)
+    subject.add_number(DATA_CHATID, ref, bits=32)
+    subject.add_string(DATA_SUBJECT, sub)
     for u in chat.users:
-        server.sendPacket(subject, u)
+        server.send_packet(subject, u)

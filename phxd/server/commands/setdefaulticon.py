@@ -1,16 +1,14 @@
-from twisted.web.client import getPage
-
-from phxd.permissions import PRIV_MODIFY_USERS
-from phxd.server.utils import certifyIcon
+from phxd.permissions import PERM_MODIFY_USERS
+from phxd.server.utils import verify_icon
 
 
 def gotIcon(data, server):
-    if data and len(data) > 0 and certifyIcon(data):
-        server.defaultIcon = data
+    if data and len(data) > 0 and verify_icon(data):
+        server.default_icon = data
 
 
 def handle(server, user, args, ref):
-    parts = str(args).strip().split()
-    url = parts[0]
-    if user.hasPriv(PRIV_MODIFY_USERS):
-        getPage(url).addCallback(gotIcon, server)
+    if user.has_perm(PERM_MODIFY_USERS):
+        # TODO: fetch icon in a thread executor
+        # getPage(args).addCallback(gotIcon, server)
+        pass

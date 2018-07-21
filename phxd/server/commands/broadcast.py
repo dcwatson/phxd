@@ -1,10 +1,10 @@
 from phxd.constants import *
 from phxd.packet import HLPacket
-from phxd.permissions import PRIV_BROADCAST
+from phxd.permissions import PERM_BROADCAST
 
 
 def handle(server, user, arg, ref):
-    if len(arg) > 0 and user.hasPriv(PRIV_BROADCAST):
+    if len(arg) > 0 and user.has_perm(PERM_BROADCAST):
         broadcast = HLPacket(HTLS_HDR_BROADCAST)
-        broadcast.addString(DATA_STRING, arg)
-        server.sendPacket(broadcast)
+        broadcast.add_string(DATA_STRING, arg)
+        server.send_packet(broadcast)

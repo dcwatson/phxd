@@ -1,12 +1,10 @@
 #!/usr/bin/env python
 
-from pydispatch import dispatcher
-from twisted.internet import reactor
-
 from phxd.server import HLServer, handlers
 from phxd.server.config import conf
 from phxd.server.signals import signal_reload
 
+import asyncio
 import logging
 import os
 import signal
@@ -27,11 +25,12 @@ def dispatch_signal(signum):
     if signum == signal.SIGHUP:
         load_config()
         handlers.reload_all()
-        dispatcher.send(signal=signal_reload)
+        signal_reload.send(None)
 
 
 def signal_handler(signum, frame):
-    reactor.callLater(0, dispatch_signal, signum)
+    # reactor.callLater(0, dispatch_signal, signum)
+    pass
 
 
 if __name__ == "__main__":
@@ -58,8 +57,15 @@ if __name__ == "__main__":
         pass
 
     # register for SIGHUP signals to reload handlers/config
-    signal.signal(signal.SIGHUP, signal_handler)
+    # signal.signal(signal.SIGHUP, signal_handler)
 
-    server = HLServer()
+    loop = asyncio.get_event_loop()
+    server = HLServer(loop=loop)
     server.start()
-    reactor.run()
+
+    try:
+        loop.run_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        loop.close()

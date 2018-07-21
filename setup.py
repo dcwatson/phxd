@@ -17,7 +17,7 @@ def get_requirements():
 setup(
     name='phxd',
     version=get_version(),
-    description='A Hotline server written in Python using Twisted.',
+    description='A Hotline and IRC server written in Python using asyncio.',
     author='Dan Watson',
     author_email='dcwatson@gmail.com',
     url='https://github.com/dcwatson/phxd',

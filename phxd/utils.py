@@ -3,7 +3,7 @@ from struct import pack, unpack
 import time
 
 
-def decodeString(data):
+def decode_string(data):
     ret = None
     try:
         # First, try to decode using UTF-8
@@ -39,7 +39,7 @@ def HLEncode(s, encoding='utf-8'):
 
 def HLDecode(b):
     if b is not None:
-        return decodeString(bytes(255 - n for n in b))
+        return decode_string(bytes(255 - n for n in b))
     return None
 
 

@@ -1,4 +1,1 @@
-PyDispatcher
-pyOpenSSL
-service-identity
-Twisted
+blinker

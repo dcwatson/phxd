@@ -1,21 +1,19 @@
 from phxd.constants import *
 from phxd.packet import HLPacket
-from phxd.permissions import PRIV_USER_INFO
+from phxd.permissions import PERM_USER_INFO
 
 
 def handle(server, user, args, ref):
-    if user.hasPriv(PRIV_USER_INFO):
-        str = ""
-        if len(server.fileserver.transfers) == 0:
-            str += "\r > No file transfers in progress."
+    if user.has_perm(PERM_USER_INFO):
+        s = ""
+        if len(server.transfers) == 0:
+            s += "\r > No file transfers in progress."
         else:
-            str += "\r > File transfers:"
-            for xfer in server.fileserver.transfers:
-                u = server.getUser(xfer.owner)
-                owner = u.nick if u else "<none>"
-                str += "\r > (%s) %s" % (owner, xfer)
+            s += "\r > File transfers:"
+            for xfer in server.transfers:
+                s += "\r > (%s) %s" % (xfer.owner.nick, xfer)
         chat = HLPacket(HTLS_HDR_CHAT)
-        chat.addString(DATA_STRING, str)
+        chat.add_string(DATA_STRING, s)
         if ref > 0:
-            chat.addInt32(DATA_CHATID, ref)
-        server.sendPacket(chat, user)
+            chat.add_number(DATA_CHATID, ref, bits=32)
+        server.send_packet(chat, user)
