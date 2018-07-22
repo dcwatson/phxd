@@ -44,10 +44,10 @@ def handle_user_disconnected(conn, server, user):
     # go through all the private chats removing this user
     # keep a list of dead chats to remove them all at once
     for chat in server.chats.values():
-        if chat.hasInvite(user):
-            chat.removeInvite(user)
-        if chat.hasUser(user):
-            chat.removeUser(user)
+        if chat.has_invite(user):
+            chat.remove_invite(user)
+        if chat.has_user(user):
+            chat.remove_user(user)
             if len(chat.users) > 0:
                 # Send a chat leave to everyone left in the chat.
                 leave = HLPacket(HTLS_HDR_CHAT_USER_LEAVE)
@@ -109,7 +109,7 @@ def handleChatCreate(server, user, packet):
 
     # First, create the new chat, adding the user.
     chat = server.create_chat()
-    chat.addUser(user)
+    chat.add_user(user)
 
     # Send the completed task with user info.
     reply = packet.response()
@@ -124,7 +124,7 @@ def handleChatCreate(server, user, packet):
 
     if who and (who.uid != user.uid):
         # Add the specified user to the invite list.
-        chat.addInvite(who)
+        chat.add_invite(who)
 
         # Invite the specified user to the newly created chat.
         invite = HLPacket(HTLS_HDR_CHAT_INVITE)
@@ -148,16 +148,16 @@ def handleChatInvite(server, user, packet):
     if uid == user.uid:
         # Ignore self invitations.
         return
-    if chat.hasInvite(who):
+    if chat.has_invite(who):
         # Ignore all invitations after the first.
         return
-    if not chat.hasUser(user):
+    if not chat.has_user(user):
         raise HLException("You are not in this chat.")
-    if chat.hasUser(who):
+    if chat.has_user(who):
         # The specified user is already in the chat.
         return
 
-    chat.addInvite(who)
+    chat.add_invite(who)
 
     # Send the invitation to the specified user.
     invite = HLPacket(HTLS_HDR_CHAT_INVITE)
@@ -171,8 +171,8 @@ def handleChatInvite(server, user, packet):
 def handleChatDecline(server, user, packet):
     ref = packet.number(DATA_CHATID, 0)
     chat = server.get_chat(ref)
-    if chat and chat.hasInvite(user):
-        chat.removeInvite(user)
+    if chat and chat.has_invite(user):
+        chat.remove_invite(user)
         s = "\r< %s has declined the invitation to chat >" % user.nick
         decline = HLPacket(HTLS_HDR_CHAT)
         decline.add_number(DATA_CHATID, chat.id, bits=32)
@@ -188,7 +188,7 @@ def handleChatJoin(server, user, packet):
 
     if not chat:
         raise HLException("Invalid chat.")
-    if not chat.hasInvite(user):
+    if not chat.has_invite(user):
         raise HLException("You were not invited to this chat.")
 
     # Send a join packet to everyone in the chat.
@@ -204,8 +204,8 @@ def handleChatJoin(server, user, packet):
         server.send_packet(join, u)
 
     # Add the joiner to the chat.
-    chat.addUser(user)
-    chat.removeInvite(user)
+    chat.add_user(user)
+    chat.remove_invite(user)
 
     # Send the userlist back to the joiner.
     list = packet.response()
@@ -220,10 +220,10 @@ def handleChatLeave(server, user, packet):
     ref = packet.number(DATA_CHATID, 0)
     chat = server.get_chat(ref)
 
-    if not chat or not chat.hasUser(user):
+    if not chat or not chat.has_user(user):
         return
 
-    chat.removeUser(user)
+    chat.remove_user(user)
     if len(chat.users) > 0:
         leave = HLPacket(HTLS_HDR_CHAT_USER_LEAVE)
         leave.add_number(DATA_CHATID, chat.id, bits=32)

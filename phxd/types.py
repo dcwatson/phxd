@@ -125,41 +125,38 @@ class HLUser:
 class HLChat:
     """ Stores information about a private chat. """
 
-    def __init__(self, id=0):
-        self.id = id
+    def __init__(self, chat_id, channel=None, subject=None):
+        self.id = chat_id
         self.users = []
-        self.invites = []
-        self.subject = ""
+        self.invites = set()
+        self.subject = subject or ''
+        self.channel = channel
 
-    def addUser(self, user):
+    def add_user(self, user):
         """ Adds the specified user to this chat. """
-        self.users.append(user)
+        if user not in self.users:
+            self.users.append(user)
 
-    def addInvite(self, user):
+    def add_invite(self, user):
         """ Adds the specified user to the list of invitees for this chat. """
-        self.invites.append(user.uid)
+        self.invites.add(user.uid)
 
-    def removeUser(self, user):
+    def remove_user(self, user):
         """ Removes the specified user from this chat. """
-        self.users.remove(user)
+        if user in self.users:
+            self.users.remove(user)
 
-    def removeInvite(self, user):
+    def remove_invite(self, user):
         """ Removes the specified user from the list of invitees for this chat. """
-        self.invites.remove(user.uid)
+        self.invites.discard(user.uid)
 
-    def hasUser(self, user):
+    def has_user(self, user):
         """ Returns True if this chat has the specified user in it. """
-        for u in self.users:
-            if u.uid == user.uid:
-                return True
-        return False
+        return user in self.users
 
-    def hasInvite(self, user):
+    def has_invite(self, user):
         """ Returns True if this chat has the specified user in its list of invitees. """
-        for uid in self.invites:
-            if user.uid == uid:
-                return True
-        return False
+        return user.uid in self.invites
 
 
 class HLResumeData:

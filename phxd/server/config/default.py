@@ -1,4 +1,5 @@
 import logging
+import socket
 
 
 ################################################################################
@@ -103,5 +104,7 @@ DEFAULT_ICON_TIME = 10
 ################################################################################
 
 ENABLE_IRC = True
+IRC_SERVER_NAME = socket.gethostname()
 IRC_PORT = 6667
 IRC_DEFAULT_ACCOUNT = 'guest'
+IRC_DEFAULT_CHANNEL = '#phxd'

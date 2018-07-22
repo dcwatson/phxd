@@ -29,6 +29,22 @@ def handle_user_disconnected(sender, server, user):
         user_leave.send(user, server=server)
 
 
+def update_user(user, packet):
+    user.nick = packet.string(DATA_NICK, user.nick)[:conf.MAX_NICK_LEN]
+    user.icon = packet.number(DATA_ICON, user.icon)
+    user.color = packet.number(DATA_COLOR, user.color)
+
+    # Set their admin status according to their kick priv.
+    if user.has_perm(PERM_KICK_USERS):
+        user.status |= STATUS_ADMIN
+    else:
+        user.status &= ~STATUS_ADMIN
+
+    # Check to see if they can use any name; if not, set their nickname to their account name.
+    if not user.has_perm(PERM_USE_ANY_NAME):
+        user.nick = user.account.login
+
+
 @packet_handler(HTLC_HDR_LOGIN)
 def handleLogin(server, user, packet):
     login = HLDecode(packet.binary(DATA_LOGIN, HLEncode("guest")))
@@ -47,11 +63,15 @@ def handleLogin(server, user, packet):
         raise HLException("Password is incorrect.", True)
 
     # Handle the nickname/icon/color stuff, broadcast the join packet.
-    handleUserChange(HTLC_HDR_LOGIN, server, user, packet)
+    update_user(user, packet)
+    server.send_user_change(user, join=True)
+
     user.valid = True
     user.account.lastLogin = datetime.now()
-
     user_login.send(user, server=server)
+
+    # Add the user to the public chat.
+    server.chats[0].add_user(user)
 
     info = packet.response()
     info.add_string(DATA_SERVERNAME, conf.SERVER_NAME)
@@ -64,20 +84,8 @@ def handleLogin(server, user, packet):
 @packet_handler(HTLC_HDR_USER_CHANGE)
 def handleUserChange(server, user, packet):
     old_nick = user.nick
-    user.nick = packet.string(DATA_NICK, user.nick)[:conf.MAX_NICK_LEN]
-    user.icon = packet.number(DATA_ICON, user.icon)
-    user.color = packet.number(DATA_COLOR, user.color)
 
-    # Set their admin status according to their kick priv.
-    if user.has_perm(PERM_KICK_USERS):
-        user.status |= STATUS_ADMIN
-    else:
-        user.status &= ~STATUS_ADMIN
-
-    # Check to see if they can use any name; if not, set their nickname to their account name.
-    if not user.has_perm(PERM_USE_ANY_NAME):
-        user.nick = user.account.name
-
+    update_user(user, packet)
     server.send_user_change(user)
 
     # If the user is already logged in, this was a user change event.

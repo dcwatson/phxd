@@ -26,7 +26,9 @@ class HLServer:
         self.last_uid = 0
         self.last_chat_id = 0
         self.connections = []
-        self.chats = {}
+        self.chats = {
+            0: HLChat(0, channel=conf.IRC_DEFAULT_CHANNEL),
+        }
         self.default_icon = ""
         self.tempBans = {}
         self.start_time = None
@@ -87,8 +89,8 @@ class HLServer:
             conn.transport.close()
 
     def notify_disconnect(self, conn):
-        self.connections.remove(conn)
         client_disconnected.send(conn, server=self, user=conn.user)
+        self.connections.remove(conn)
 
     def notify_packet(self, conn, packet):
         try:
@@ -140,7 +142,8 @@ class HLServer:
         client_connected.send(conn, server=self, user=conn.user)
 
     def irc_disconnect(self, conn):
-        pass
+        client_disconnected.send(conn, server=self, user=conn.user)
+        self.connections.remove(conn)
 
     # Packet sending methods
 
@@ -162,7 +165,7 @@ class HLServer:
         for conn in conns:
             conn.write_packet(packet)
 
-    def send_user_change(self, user):
+    def send_user_change(self, user, join=False):
         change = HLPacket(HTLS_HDR_USER_CHANGE)
         change.add_number(DATA_UID, user.uid)
         change.add_string(DATA_NICK, user.nick)
@@ -170,6 +173,10 @@ class HLServer:
         change.add_number(DATA_STATUS, user.status)
         if user.color >= 0:
             change.add_number(DATA_COLOR, user.color, bits=32)
+        if join:
+            # For clients who want to be dumb about knowing if this was a join or change.
+            # Plus it makes sending channel JOINs in the IRC handler easier.
+            change.add_number(DATA_JOIN, 1)
         self.send_packet(change, lambda c: c.user.valid)
 
     # File transfers
@@ -221,9 +228,9 @@ class HLServer:
 
     def get_user(self, uid):
         """ Gets the HLUser object for the specified uid. """
-        for user in self.userlist:
-            if user.uid == uid:
-                return user
+        for conn in self.connections:
+            if conn.user.uid == uid:
+                return conn.user
         return None
 
     def disconnect_user(self, user):
@@ -234,10 +241,10 @@ class HLServer:
 
     # Private chat functions
 
-    def create_chat(self):
+    def create_chat(self, channel=None):
         """ Creates and registers a new private chat, returns the ID of the newly created chat. """
         self.last_chat_id += 1
-        return self.chats.setdefault(self.last_chat_id, HLChat(self.last_chat_id))
+        return self.chats.setdefault(self.last_chat_id, HLChat(self.last_chat_id, channel=channel))
 
     def remove_chat(self, chat_id):
         """ Remove the specified private chat. """
@@ -247,6 +254,12 @@ class HLServer:
     def get_chat(self, chat_id):
         """ Gets the HLChat object for the specified chat ID. """
         return self.chats.get(chat_id)
+
+    def get_channel(self, channel):
+        for chat_id, chat in self.chats.items():
+            if chat.channel == channel:
+                return chat
+        return None
 
     # Repeating tasks
 
