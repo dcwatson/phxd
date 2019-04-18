@@ -1,6 +1,13 @@
 from datetime import datetime, timedelta
 from struct import pack, unpack
+import importlib
 import time
+
+
+def import_string(path):
+    module_path, attr_name = path.rsplit('.', 1)
+    mod = importlib.import_module(module_path)
+    return getattr(mod, attr_name)
 
 
 def decode_string(data):

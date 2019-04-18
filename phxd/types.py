@@ -1,6 +1,7 @@
+import dorm
+
 from phxd.utils import HLCharConst, HLDecodeConst
 
-from datetime import datetime
 from struct import pack, unpack
 import io
 import os
@@ -18,47 +19,28 @@ class HLException (Exception):
         return self.msg
 
 
-class HLAccount (object):
-    """ Stores account information. """
-
-    def __init__(self, login=""):
-        self.id = 0
-        self.login = login
-        self.password = ""
-        self.name = ""
-        self.privs = 0
-        self.fileRoot = ""
-        self.profile = ""
-
-    def __str__(self):
-        return "<HLAccount '%s'>" % self.login
+class HLAccount (dorm.Table):
+    __table__ = 'account'
+    columns = {
+        'login': dorm.Column('varchar UNIQUE'),
+        'password': dorm.String,
+        'name': dorm.String,
+        'privs': dorm.Integer,
+        'file_root': dorm.String,
+    }
 
     def has_perm(self, priv):
         return ((int(self.privs) & priv) > 0)
 
 
-class HLNewsPost (object):
-    """ Stores information about a single news post. """
-
-    def __init__(self, nick="", login="", body=""):
-        self.id = 0
-        self.nick = nick
-        self.login = login
-        self.body = body
-        self.date = datetime.now()
-
-
-class HLMail (object):
-    """ Stores information about a mail message. """
-
-    def __init__(self, to_login="", from_login="", msg=""):
-        self.to_login = to_login
-        self.from_login = from_login
-        self.message = msg
-        self.sent = datetime.now()
-
-    def __str__(self):
-        return '<HLMail From:"%s" To:"%s" Message:"%s">' % (self.from_login, self.to_login, self.message)
+class HLNewsPost (dorm.Table):
+    __table__ = 'news'
+    columns = {
+        'nick': dorm.String,
+        'login': dorm.String,
+        'body': dorm.String,
+        'date': dorm.Timestamp,
+    }
 
 
 class HLUser:

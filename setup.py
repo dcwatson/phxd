@@ -24,10 +24,11 @@ setup(
     license='BSD',
     packages=find_packages(),
     install_requires=get_requirements(),
-    scripts=[
-        'scripts/phxd',
-        'scripts/phx',
-    ],
+    entry_points={
+        'console_scripts': [
+            'phxd=phxd.server.__main__:main',
+        ]
+    },
     classifiers=[
         'Development Status :: 4 - Beta',
         'License :: OSI Approved :: BSD License',

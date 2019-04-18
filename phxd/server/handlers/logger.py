@@ -1,7 +1,6 @@
 from phxd.constants import *
 from phxd.server.config import conf
 from phxd.server.decorators import packet_filter
-from phxd.server.signals import user_change, user_leave, user_login
 
 import codecs
 import os

@@ -2,20 +2,20 @@ from phxd.constants import *
 from phxd.packet import HLContainer
 from phxd.permissions import *
 from phxd.server.decorators import *
-from phxd.server.signals import *
 from phxd.types import HLAccount, HLException
 from phxd.utils import *
+
+from .base import ServerHandler
 
 import hashlib
 import logging
 
 
-@packet_handler(HTLC_HDR_ACCOUNT_READ)
 @require_permission(PERM_READ_USERS, "view accounts")
 def handleAccountRead(server, user, packet):
     login = packet.string(DATA_LOGIN, "")
 
-    acct = server.database.loadAccount(login)
+    acct = HLAccount.query(login=login).get()
     if not acct:
         raise HLException("Error loading account.")
 
@@ -27,7 +27,6 @@ def handleAccountRead(server, user, packet):
     server.send_packet(reply, user)
 
 
-@packet_handler(HTLC_HDR_ACCOUNT_MODIFY)
 @require_permission(PERM_MODIFY_USERS, "modify accounts")
 def handleAccountModify(server, user, packet):
     login = HLDecode(packet.binary(DATA_LOGIN, b""))
@@ -35,7 +34,7 @@ def handleAccountModify(server, user, packet):
     name = packet.string(DATA_NICK, "")
     privs = packet.number(DATA_PRIVS, 0)
 
-    acct = server.database.loadAccount(login)
+    acct = HLAccount.query(login=login).get()
     if not acct:
         raise HLException("Invalid account.")
 
@@ -43,13 +42,13 @@ def handleAccountModify(server, user, packet):
     acct.privs = privs
     if pw_data != "\x00":
         acct.password = hashlib.md5(HLDecode(pw_data).encode('utf-8')).hexdigest()
-    server.database.saveAccount(acct)
+    acct.save()
+
     server.send_packet(packet.response(), user)
     # server.updateAccounts( acct )
     logging.info("[account] %s modified by %s", login, user)
 
 
-@packet_handler(HTLC_HDR_ACCOUNT_CREATE)
 @require_permission(PERM_CREATE_USERS, "create accounts")
 def handleAccountCreate(server, user, packet):
     login = HLDecode(packet.binary(DATA_LOGIN, b""))
@@ -57,20 +56,16 @@ def handleAccountCreate(server, user, packet):
     name = packet.string(DATA_NICK, "")
     privs = packet.number(DATA_PRIVS, 0)
 
-    if server.database.loadAccount(login):
+    if HLAccount.query(login=login).count():
         raise HLException("Login already exists.")
 
-    acct = HLAccount(login)
-    acct.password = hashlib.md5(passwd.encode('utf-8')).hexdigest()
-    acct.name = name
-    acct.privs = privs
+    password = hashlib.md5(passwd.encode('utf-8')).hexdigest()
+    HLAccount.insert(login=login, password=password, name=name, privs=privs)
 
-    server.database.saveAccount(acct)
     server.send_packet(packet.response(), user)
     logging.info("[account] %s created by %s", login, user)
 
 
-@packet_handler(HTLC_HDR_ACCOUNT_DELETE)
 @require_permission(PERM_DELETE_USERS, "delete accounts")
 def handleAccountDelete(server, user, packet):
     login = HLDecode(packet.binary(DATA_LOGIN, b""))
@@ -84,7 +79,6 @@ def handleAccountDelete(server, user, packet):
 # Avaraline extensions
 
 
-@packet_handler(HTLC_HDR_ACCOUNT_SELFMODIFY)
 @require_permission(PERM_CHANGE_PASSWORD, "modify your account")
 def handleAccountSelfModify(server, user, packet):
     profile = packet.string(DATA_STRING, None)
@@ -93,12 +87,11 @@ def handleAccountSelfModify(server, user, packet):
         user.account.profile = profile
     if passwd is not None and passwd != "\x00":
         user.account.password = hashlib.md5(HLDecode(passwd).encode('utf-8')).hexdigest()
-    server.database.saveAccount(user.account)
+    user.account.save()
     server.send_packet(packet.response(), user)
     logging.info("[account] self-modify %s", user)
 
 
-@packet_handler(HTLC_HDR_PERMISSION_LIST)
 def handlePermissionList(server, user, packet):
     resp = packet.response()
     for group in permission_groups:
@@ -111,3 +104,14 @@ def handlePermissionList(server, user, packet):
             gc.add_container(DATA_PERM, pc)
         resp.add_container(DATA_PERMGROUP, gc)
     server.send_packet(resp, user)
+
+
+class AccountHandler (ServerHandler):
+    packet_handlers = {
+        HTLC_HDR_ACCOUNT_READ: handleAccountRead,
+        HTLC_HDR_ACCOUNT_MODIFY: handleAccountModify,
+        HTLC_HDR_ACCOUNT_CREATE: handleAccountCreate,
+        HTLC_HDR_ACCOUNT_DELETE: handleAccountDelete,
+        HTLC_HDR_ACCOUNT_SELFMODIFY: handleAccountSelfModify,
+        HTLC_HDR_PERMISSION_LIST: handlePermissionList,
+    }

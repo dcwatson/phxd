@@ -4,6 +4,10 @@ from phxd.utils import HLClientMagic, HLServerMagic
 
 from struct import unpack
 import asyncio
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 
 class HLProtocol (asyncio.Protocol):
@@ -103,6 +107,7 @@ class HLTransferProtocol (asyncio.Protocol):
 
     def start(self, transfer, send_magic=False):
         """ This should be called after magic has been received. transferInfo should be a HLTransfer instance. """
+        logger.debug('Starting transfer %d: incoming=%d', transfer.id, transfer.incoming)
         self.transfer = transfer
         self.transfer.start()
         if self.transfer.incoming:
@@ -121,7 +126,7 @@ class HLTransferProtocol (asyncio.Protocol):
                     # The upload is done, it's our job to close the connection.
                     self.transport.close()
             else:
-                print("got non-magic data for a download")
+                logger.debug('Received %d non-magic download bytes', len(self.buffered))
                 self.transport.close()
         else:
             # Make sure we buffer at this point in case we don't get the

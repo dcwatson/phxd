@@ -1,22 +1,12 @@
 from phxd.constants import *
 from phxd.packet import HLPacket
 from phxd.server.config import conf
-from phxd.server.decorators import packet_handler
-from phxd.server.signals import user_login
 from phxd.server.utils import verify_icon
 from phxd.types import HLException
 
+from .base import ServerHandler
+
 from struct import pack
-
-
-def install():
-    if conf.ENABLE_GIF_ICONS:
-        user_login.connect(start_gif_timer)
-
-
-def uninstall():
-    if conf.ENABLE_GIF_ICONS:
-        user_login.disconnect(start_gif_timer)
 
 
 def set_default_icon(server, user):
@@ -26,11 +16,6 @@ def set_default_icon(server, user):
         server.send_packet(change)
 
 
-def start_gif_timer(user, server):
-    server.loop.call_later(conf.DEFAULT_ICON_TIME, set_default_icon, server, user)
-
-
-@packet_handler(HTLC_HDR_ICON_LIST)
 def handleIconList(server, user, packet):
     list = packet.response()
     for u in server.userlist:
@@ -39,7 +24,6 @@ def handleIconList(server, user, packet):
     server.send_packet(list, user)
 
 
-@packet_handler(HTLC_HDR_ICON_SET)
 def handleIconSet(server, user, packet):
     iconData = packet.binary(DATA_GIFICON, b"")
 
@@ -51,7 +35,6 @@ def handleIconSet(server, user, packet):
         server.send_packet(change)
 
 
-@packet_handler(HTLC_HDR_ICON_GET)
 def handleIconGet(server, user, packet):
     uid = packet.number(DATA_UID, 0)
     info = server.get_user(uid)
@@ -61,3 +44,15 @@ def handleIconGet(server, user, packet):
     icon.add_number(DATA_UID, info.uid)
     icon.add(DATA_GIFICON, info.gif)
     server.send_packet(icon, user)
+
+
+class IconHandler (ServerHandler):
+    packet_handlers = {
+        HTLC_HDR_ICON_LIST: handleIconList,
+        HTLC_HDR_ICON_SET: handleIconSet,
+        HTLC_HDR_ICON_GET: handleIconGet,
+    }
+
+    def user_login(self, server, user):
+        if conf.ENABLE_GIF_ICONS:
+            server.loop.call_later(conf.DEFAULT_ICON_TIME, set_default_icon, server, user)

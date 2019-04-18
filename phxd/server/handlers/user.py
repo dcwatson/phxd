@@ -2,10 +2,11 @@ from phxd.constants import *
 from phxd.packet import HLPacket
 from phxd.permissions import *
 from phxd.server.config import conf
-from phxd.server.decorators import packet_handler, require_permission
-from phxd.server.signals import client_disconnected, user_change, user_leave, user_login
-from phxd.types import HLException
+from phxd.server.decorators import require_permission
+from phxd.types import HLAccount, HLException
 from phxd.utils import *
+
+from .base import ServerHandler
 
 from datetime import datetime
 import hashlib
@@ -18,15 +19,6 @@ def install():
 
 def uninstall():
     client_disconnected.disconnect(handle_user_disconnected)
-
-
-def handle_user_disconnected(sender, server, user):
-    if user.valid:
-        user.valid = False
-        leave = HLPacket(HTLS_HDR_USER_LEAVE)
-        leave.add_number(DATA_UID, user.uid)
-        server.send_packet(leave)
-        user_leave.send(user, server=server)
 
 
 def update_user(user, packet):
@@ -45,7 +37,6 @@ def update_user(user, packet):
         user.nick = user.account.login
 
 
-@packet_handler(HTLC_HDR_LOGIN)
 def handleLogin(server, user, packet):
     login = HLDecode(packet.binary(DATA_LOGIN, HLEncode("guest")))
     password = HLDecode(packet.binary(DATA_PASSWORD, b""))
@@ -56,7 +47,7 @@ def handleLogin(server, user, packet):
         raise HLException("You are banned: %s" % reason, True)
 
     # Load and configure the account information.
-    user.account = server.database.loadAccount(login)
+    user.account = HLAccount.query(login=login).get()
     if not user.account:
         raise HLException("Login is incorrect.", True)
     if user.account.password != hashlib.md5(password.encode('utf-8')).hexdigest():
@@ -68,7 +59,7 @@ def handleLogin(server, user, packet):
 
     user.valid = True
     user.account.lastLogin = datetime.now()
-    user_login.send(user, server=server)
+    server.fire('user_login', user=user)
 
     # Add the user to the public chat.
     server.chats[0].add_user(user)
@@ -81,7 +72,6 @@ def handleLogin(server, user, packet):
     logging.info("[login] successful login for %s", user)
 
 
-@packet_handler(HTLC_HDR_USER_CHANGE)
 def handleUserChange(server, user, packet):
     old_nick = user.nick
 
@@ -90,10 +80,9 @@ def handleUserChange(server, user, packet):
 
     # If the user is already logged in, this was a user change event.
     if user.valid:
-        user_change.send(user, server=server, old_nick=old_nick)
+        server.fire('user_change', user=user, old_nick=old_nick)
 
 
-@packet_handler(HTLC_HDR_USER_LIST)
 def handleUserList(server, user, packet):
     reply = packet.response()
     for u in server.userlist:
@@ -101,7 +90,6 @@ def handleUserList(server, user, packet):
     server.send_packet(reply, user)
 
 
-@packet_handler(HTLC_HDR_USER_INFO)
 @require_permission(PERM_USER_INFO, "view user information")
 def handleUserInfo(server, user, packet):
     uid = packet.number(DATA_UID, 0)
@@ -130,7 +118,6 @@ def handleUserInfo(server, user, packet):
     server.send_packet(reply, user)
 
 
-@packet_handler(HTLC_HDR_KICK)
 def handleUserKick(server, user, packet):
     uid = packet.number(DATA_UID, 0)
     ban = packet.number(DATA_BAN, 0)
@@ -157,14 +144,12 @@ def handleUserKick(server, user, packet):
     logging.info("[kick] %s disconnected by %s", who, user)
 
 
-@packet_handler(HTLC_HDR_PING)
 def handlePing(server, user, packet):
     server.send_packet(packet.response(), user)
 
 # Avaraline extensions
 
 
-@packet_handler(HTLC_HDR_USER_INFO_UNFORMATTED)
 @require_permission(PERM_USER_INFO, "view user information")
 def handleUserInfoUnformatted(server, user, packet):
     uid = packet.number(DATA_UID, 0)
@@ -180,3 +165,23 @@ def handleUserInfoUnformatted(server, user, packet):
     reply.add_string(DATA_STRING, who.account.name)
     reply.add_string(DATA_IP, who.ip)
     server.send_packet(reply, user)
+
+
+class UserHandler (ServerHandler):
+    packet_handlers = {
+        HTLC_HDR_LOGIN: handleLogin,
+        HTLC_HDR_USER_CHANGE: handleUserChange,
+        HTLC_HDR_USER_LIST: handleUserList,
+        HTLC_HDR_USER_INFO: handleUserInfo,
+        HTLC_HDR_KICK: handleUserKick,
+        HTLC_HDR_PING: handlePing,
+        HTLC_HDR_USER_INFO_UNFORMATTED: handleUserInfoUnformatted,
+    }
+
+    def user_disconnected(self, server, user):
+        if user.valid:
+            user.valid = False
+            leave = HLPacket(HTLS_HDR_USER_LEAVE)
+            leave.add_number(DATA_UID, user.uid)
+            server.send_packet(leave)
+            server.fire('user_leave', user=user)

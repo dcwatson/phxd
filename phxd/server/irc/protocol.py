@@ -1,7 +1,7 @@
 from phxd.constants import *
 from phxd.packet import HLPacket
 from phxd.server.config import conf
-from phxd.server.signals import user_login
+from phxd.types import HLAccount
 
 from .constants import RPL
 
@@ -93,7 +93,7 @@ class IRCProtocol (asyncio.Protocol):
 
     def handle_NICK(self, *params, prefix=None):
         self.user.nick = params[0]
-        self.user.account = self.server.database.loadAccount(conf.IRC_DEFAULT_ACCOUNT)
+        self.user.account = HLAccount.query(login=conf.IRC_DEFAULT_ACCOUNT).get()
         self.user.valid = True
         self.server.send_user_change(self.user)
         self.send(RPL.WELCOME, self.user.nick, 'The public chat room for this server is {}'.format(conf.IRC_DEFAULT_CHANNEL))

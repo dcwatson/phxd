@@ -1,4 +1,3 @@
-import logging
 import socket
 
 
@@ -6,15 +5,29 @@ import socket
 # database configuration
 ################################################################################
 
-DB_TYPE = 'sqlite'
-DB_ARG = 'phxd.db'
+DB_FILE = 'phxd.db'
 
 ################################################################################
 # logging configuration
 ################################################################################
 
-LOG_FILE = None
-LOG_LEVEL = logging.DEBUG
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': True,
+    'handlers': {
+        'console': {
+            'level': 'DEBUG',
+            'class': 'logging.StreamHandler',
+        },
+    },
+    'loggers': {
+        'phxd': {
+            'handlers': ['console'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+    },
+}
 
 ################################################################################
 # server configuration
@@ -25,6 +38,15 @@ SERVER_PORTS = (5500,)
 SERVER_NAME = "my_phxd_server"
 IDLE_TIME = 10 * 60
 BAN_TIME = 15 * 60
+HANDLERS = [
+    'phxd.server.handlers.user.UserHandler',
+    'phxd.server.handlers.chat.ChatHandler',
+    'phxd.server.handlers.message.MessageHandler',
+    'phxd.server.handlers.account.AccountHandler',
+    'phxd.server.handlers.news.NewsHandler',
+    'phxd.server.handlers.files.FilesHandler',
+    'phxd.server.handlers.icon.IconHandler',
+]
 
 ################################################################################
 # SSL configuration

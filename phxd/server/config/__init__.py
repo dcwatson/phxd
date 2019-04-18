@@ -1,5 +1,7 @@
 from phxd.server.config import default as default_settings
 
+import importlib
+
 
 class Settings:
     def __init__(self):
@@ -10,8 +12,10 @@ class Settings:
         return self._vars[name]
 
     def update(self, mod):
+        if isinstance(mod, str):
+            mod = importlib.import_module(mod)
         for name in dir(mod):
-            if name == name.upper() and not name.startswith('_'):
+            if name.isupper() and not name.startswith('_'):
                 self._vars[name] = getattr(mod, name)
 
 

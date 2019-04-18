@@ -2,20 +2,13 @@ from phxd.constants import *
 from phxd.packet import HLPacket
 from phxd.permissions import PERM_CREATE_CHATS, PERM_READ_CHAT, PERM_SEND_CHAT
 from phxd.server.config import conf
-from phxd.server.decorators import packet_handler, require_permission
-from phxd.server.signals import client_disconnected
+from phxd.server.decorators import require_permission
 from phxd.types import HLException
+
+from .base import ServerHandler
 
 import logging
 import sys
-
-
-def install():
-    client_disconnected.connect(handle_user_disconnected)
-
-
-def uninstall():
-    client_disconnected.disconnect(handle_user_disconnected)
 
 
 def _dispatchCommand(server, user, line, ref):
@@ -39,31 +32,6 @@ def _dispatchCommand(server, user, line, ref):
     return False
 
 
-def handle_user_disconnected(conn, server, user):
-    deadChats = []
-    # go through all the private chats removing this user
-    # keep a list of dead chats to remove them all at once
-    for chat in server.chats.values():
-        if chat.has_invite(user):
-            chat.remove_invite(user)
-        if chat.has_user(user):
-            chat.remove_user(user)
-            if len(chat.users) > 0:
-                # Send a chat leave to everyone left in the chat.
-                leave = HLPacket(HTLS_HDR_CHAT_USER_LEAVE)
-                leave.add_number(DATA_CHATID, chat.id, bits=32)
-                leave.add_number(DATA_UID, user.uid)
-                for u in chat.users:
-                    server.send_packet(leave, u)
-            else:
-                # Otherwise, mark the chat as dead.
-                deadChats.append(chat.id)
-    # Now we can remove all the dead chats without modifying the list we were iterating through.
-    for dead in deadChats:
-        server.remove_chat(dead)
-
-
-@packet_handler(HTLC_HDR_CHAT)
 def handleChat(server, user, packet):
     str = packet.string(DATA_STRING, "")
     opt = packet.number(DATA_OPTION, 0)
@@ -101,7 +69,6 @@ def handleChat(server, user, packet):
                     server.send_packet(chat, lambda c: c.user.has_perm(PERM_READ_CHAT))
 
 
-@packet_handler(HTLC_HDR_CHAT_CREATE)
 @require_permission(PERM_CREATE_CHATS, "create private chats")
 def handleChatCreate(server, user, packet):
     uid = packet.number(DATA_UID, 0)
@@ -134,7 +101,6 @@ def handleChatCreate(server, user, packet):
         server.send_packet(invite, who)
 
 
-@packet_handler(HTLC_HDR_CHAT_INVITE)
 def handleChatInvite(server, user, packet):
     ref = packet.number(DATA_CHATID, 0)
     uid = packet.number(DATA_UID, 0)
@@ -167,7 +133,6 @@ def handleChatInvite(server, user, packet):
     server.send_packet(invite, who)
 
 
-@packet_handler(HTLC_HDR_CHAT_DECLINE)
 def handleChatDecline(server, user, packet):
     ref = packet.number(DATA_CHATID, 0)
     chat = server.get_chat(ref)
@@ -181,7 +146,6 @@ def handleChatDecline(server, user, packet):
             server.send_packet(decline, u)
 
 
-@packet_handler(HTLC_HDR_CHAT_JOIN)
 def handleChatJoin(server, user, packet):
     ref = packet.number(DATA_CHATID, 0)
     chat = server.get_chat(ref)
@@ -215,7 +179,6 @@ def handleChatJoin(server, user, packet):
     server.send_packet(list, user)
 
 
-@packet_handler(HTLC_HDR_CHAT_LEAVE)
 def handleChatLeave(server, user, packet):
     ref = packet.number(DATA_CHATID, 0)
     chat = server.get_chat(ref)
@@ -234,7 +197,6 @@ def handleChatLeave(server, user, packet):
         server.remove_chat(chat.id)
 
 
-@packet_handler(HTLC_HDR_CHAT_SUBJECT)
 def handleChatSubject(server, user, packet):
     ref = packet.number(DATA_CHATID, 0)
     sub = packet.string(DATA_SUBJECT, "")
@@ -248,3 +210,38 @@ def handleChatSubject(server, user, packet):
     subject.add_string(DATA_SUBJECT, sub)
     for u in chat.users:
         server.send_packet(subject, u)
+
+
+class ChatHandler (ServerHandler):
+    packet_handlers = {
+        HTLC_HDR_CHAT: handleChat,
+        HTLC_HDR_CHAT_CREATE: handleChatCreate,
+        HTLC_HDR_CHAT_INVITE: handleChatInvite,
+        HTLC_HDR_CHAT_DECLINE: handleChatDecline,
+        HTLC_HDR_CHAT_JOIN: handleChatJoin,
+        HTLC_HDR_CHAT_LEAVE: handleChatLeave,
+        HTLC_HDR_CHAT_SUBJECT: handleChatSubject,
+    }
+
+    def user_disconnected(self, server, user):
+        deadChats = []
+        # go through all the private chats removing this user
+        # keep a list of dead chats to remove them all at once
+        for chat in server.chats.values():
+            if chat.has_invite(user):
+                chat.remove_invite(user)
+            if chat.has_user(user):
+                chat.remove_user(user)
+                if len(chat.users) > 0:
+                    # Send a chat leave to everyone left in the chat.
+                    leave = HLPacket(HTLS_HDR_CHAT_USER_LEAVE)
+                    leave.add_number(DATA_CHATID, chat.id, bits=32)
+                    leave.add_number(DATA_UID, user.uid)
+                    for u in chat.users:
+                        server.send_packet(leave, u)
+                else:
+                    # Otherwise, mark the chat as dead.
+                    deadChats.append(chat.id)
+        # Now we can remove all the dead chats without modifying the list we were iterating through.
+        for dead in deadChats:
+            server.remove_chat(dead)

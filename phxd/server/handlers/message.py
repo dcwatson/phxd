@@ -2,11 +2,11 @@ from phxd.constants import *
 from phxd.packet import HLPacket
 from phxd.permissions import *
 from phxd.server.config import conf
-from phxd.server.decorators import *
-from phxd.server.signals import *
+from phxd.server.decorators import require_permission
+
+from .base import ServerHandler
 
 
-@packet_handler(HTLC_HDR_MSG)
 @require_permission(PERM_SEND_MESSAGES, "send messages")
 def handleMessage(server, user, packet):
     uid = packet.number(DATA_UID, 0)
@@ -23,7 +23,6 @@ def handleMessage(server, user, packet):
     server.send_packet(packet.response(), user)
 
 
-@packet_handler(HTLC_HDR_BROADCAST)
 @require_permission(PERM_BROADCAST, "broadcast messages")
 def handleBroadcast(server, user, packet):
     s = packet.string(DATA_STRING, "")
@@ -31,3 +30,10 @@ def handleBroadcast(server, user, packet):
     broadcast.add_string(DATA_STRING, s)
     server.send_packet(broadcast)
     server.send_packet(packet.response(), user)
+
+
+class MessageHandler (ServerHandler):
+    packet_handlers = {
+        HTLC_HDR_MSG: handleMessage,
+        HTLC_HDR_BROADCAST: handleBroadcast,
+    }

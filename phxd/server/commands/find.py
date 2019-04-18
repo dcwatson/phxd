@@ -7,7 +7,7 @@ import os
 
 def handle(server, user, arg, ref):
     if len(arg) > 0:
-        rootDir = user.account.fileRoot
+        rootDir = user.account.file_root
         if not rootDir:
             rootDir = conf.FILE_ROOT
         pre = len(rootDir)

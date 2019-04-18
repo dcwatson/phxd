@@ -1,6 +1,5 @@
 from phxd.constants import *
 from phxd.packet import HLPacket
-from phxd.server.signals import packet_type_received
 
 
 def handle(server, user, args, ref):

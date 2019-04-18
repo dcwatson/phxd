@@ -1,37 +1,15 @@
 from phxd.constants import *
 from phxd.permissions import *
 from phxd.server.config import conf
-from phxd.server.decorators import packet_handler, require_permission
-from phxd.server.signals import transfer_completed
+from phxd.server.decorators import require_permission
 from phxd.types import HLException, HLFile, HLResumeData
 from phxd.utils import HLEncodeDate, decode_string
+
+from .base import ServerHandler
 
 from datetime import datetime
 from struct import unpack
 import os
-
-
-def install():
-    transfer_completed.connect(handle_transfer_finished)
-
-
-def uninstall():
-    transfer_completed.disconnect(handle_transfer_finished)
-
-
-def handle_transfer_finished(server, transfer):
-    if transfer.incoming and transfer.is_complete():
-        if conf.UPLOAD_SCRIPT:
-            pargs = [
-                transfer.file.dataPath,
-            ]
-            environ = {
-                'USER_LOGIN': str(transfer.owner.account.login),
-                'USER_NICK': str(transfer.owner.nick),
-                'USER_IPADDR': str(transfer.owner.ip),
-            }
-            print(conf.UPLOAD_SCRIPT, pargs, environ)
-            # utils.getProcessOutput(conf.UPLOAD_SCRIPT, args=pargs, env=environ)
 
 
 def parseDir(d):
@@ -68,10 +46,9 @@ def buildPath(root, d, file=None):
 # handler methods
 
 
-@packet_handler(HTLC_HDR_FILE_LIST)
 def handleFileList(server, user, packet):
     dir = parseDir(packet.binary(DATA_DIR))
-    path = buildPath(user.account.fileRoot, dir)
+    path = buildPath(user.account.file_root, dir)
 
     if not os.path.exists(path):
         raise HLException("The specified directory does not exist.")
@@ -91,7 +68,6 @@ def handleFileList(server, user, packet):
     server.send_packet(reply, user)
 
 
-@packet_handler(HTLC_HDR_FILE_GET)
 @require_permission(PERM_DOWNLOAD_FILES, "download files")
 def handleFileDownload(server, user, packet):
     dir = parseDir(packet.binary(DATA_DIR))
@@ -99,7 +75,7 @@ def handleFileDownload(server, user, packet):
     resume = HLResumeData(packet.binary(DATA_RESUME))
     # options = packet.number(DATA_XFEROPTIONS, 0)
 
-    path = buildPath(user.account.fileRoot, dir, name)
+    path = buildPath(user.account.file_root, dir, name)
     if not os.path.exists(path):
         raise HLException("Specified file does not exist.")
 
@@ -114,7 +90,6 @@ def handleFileDownload(server, user, packet):
     server.send_packet(reply, user)
 
 
-@packet_handler(HTLC_HDR_FILE_PUT)
 @require_permission(PERM_UPLOAD_FILES, "upload files")
 def handleFileUpload(server, user, packet):
     dir = parseDir(packet.binary(DATA_DIR))
@@ -122,14 +97,14 @@ def handleFileUpload(server, user, packet):
     size = packet.number(DATA_XFERSIZE, 0)
     # options = packet.number(DATA_XFEROPTIONS, 0)
 
-    path = buildPath(user.account.fileRoot, dir, name)
+    path = buildPath(user.account.file_root, dir, name)
     if os.path.exists(path):
         raise HLException("File already exists.")
     if (not user.has_perm(PERM_UPLOAD_ANYWHERE)) and (path.upper().find("UPLOAD") < 0 or path.upper().find("DROP BOX") < 0):
         raise HLException("You must upload to an upload directory or drop box.")
 
     # Make sure we have enough disk space to accept the file.
-    upDir = buildPath(user.account.fileRoot, dir)
+    upDir = buildPath(user.account.file_root, dir)
     info = os.statvfs(upDir)
     free = info.f_bavail * info.f_frsize
     if size >= free:
@@ -146,11 +121,10 @@ def handleFileUpload(server, user, packet):
     server.send_packet(reply, user)
 
 
-@packet_handler(HTLC_HDR_FILE_DELETE)
 def handleFileDelete(server, user, packet):
     dir = parseDir(packet.binary(DATA_DIR))
     name = packet.string(DATA_FILENAME, "")
-    path = buildPath(user.account.fileRoot, dir, name)
+    path = buildPath(user.account.file_root, dir, name)
     if not os.path.exists(path):
         raise HLException("Specified file or directory does not exist.")
     if os.path.isdir(path):
@@ -172,27 +146,25 @@ def handleFileDelete(server, user, packet):
     server.send_packet(packet.response(), user)
 
 
-@packet_handler(HTLC_HDR_FILE_MKDIR)
 @require_permission(PERM_CREATE_FOLDERS, "create folders")
 def handleFolderCreate(server, user, packet):
     dir = parseDir(packet.binary(DATA_DIR))
     name = packet.string(DATA_FILENAME, "")
-    path = buildPath(user.account.fileRoot, dir, name)
+    path = buildPath(user.account.file_root, dir, name)
     if os.path.exists(path):
         raise HLException("Specified directory already exists.")
     os.mkdir(path, conf.DIR_UMASK)
     server.send_packet(packet.response(), user)
 
 
-@packet_handler(HTLC_HDR_FILE_MOVE)
 @require_permission(PERM_MOVE_FILES, "move files")
 def handleFileMove(server, user, packet):
     oldDir = parseDir(packet.binary(DATA_DIR))
     newDir = parseDir(packet.binary(DATA_NEWDIR))
     name = packet.string(DATA_FILENAME, "")
 
-    oldPath = buildPath(user.account.fileRoot, oldDir, name)
-    newPath = buildPath(user.account.fileRoot, newDir, name)
+    oldPath = buildPath(user.account.file_root, oldDir, name)
+    newPath = buildPath(user.account.file_root, newDir, name)
 
     if not os.path.exists(oldPath):
         raise HLException("Invalid file or directory.")
@@ -205,12 +177,11 @@ def handleFileMove(server, user, packet):
     server.send_packet(packet.response(), user)
 
 
-@packet_handler(HTLC_HDR_FILE_GETINFO)
 def handleFileGetInfo(server, user, packet):
     dir = parseDir(packet.binary(DATA_DIR))
     name = packet.string(DATA_FILENAME, b"")
 
-    path = buildPath(user.account.fileRoot, dir, name)
+    path = buildPath(user.account.file_root, dir, name)
     if not os.path.exists(path):
         raise HLException("No such file or directory.")
 
@@ -228,7 +199,6 @@ def handleFileGetInfo(server, user, packet):
     server.send_packet(info, user)
 
 
-@packet_handler(HTLC_HDR_FILE_SETINFO)
 def handleFileSetInfo(server, user, packet):
     dir = parseDir(packet.binary(DATA_DIR))
     oldName = packet.string(DATA_FILENAME, "")
@@ -238,8 +208,8 @@ def handleFileSetInfo(server, user, packet):
     if (oldName != newName) and (not user.has_perm(PERM_RENAME_FILES)):
         raise HLException("You cannot rename files.")
 
-    oldPath = buildPath(user.account.fileRoot, dir, oldName)
-    newPath = buildPath(user.account.fileRoot, dir, newName)
+    oldPath = buildPath(user.account.file_root, dir, oldName)
+    newPath = buildPath(user.account.file_root, dir, newName)
 
     if not os.path.exists(oldPath):
         raise HLException("Invalid file or directory.")
@@ -251,3 +221,30 @@ def handleFileSetInfo(server, user, packet):
     file.setComment(comment)
 
     server.send_packet(packet.response(), user)
+
+
+class FilesHandler (ServerHandler):
+    packet_handlers = {
+        HTLC_HDR_FILE_LIST: handleFileList,
+        HTLC_HDR_FILE_GET: handleFileDownload,
+        HTLC_HDR_FILE_PUT: handleFileUpload,
+        HTLC_HDR_FILE_DELETE: handleFileDelete,
+        HTLC_HDR_FILE_MKDIR: handleFolderCreate,
+        HTLC_HDR_FILE_MOVE: handleFileMove,
+        HTLC_HDR_FILE_GETINFO: handleFileGetInfo,
+        HTLC_HDR_FILE_SETINFO: handleFileSetInfo,
+    }
+
+    def transfer_completed(self, server, transfer):
+        if transfer.incoming and transfer.is_complete():
+            if conf.UPLOAD_SCRIPT:
+                pargs = [
+                    transfer.file.dataPath,
+                ]
+                environ = {
+                    'USER_LOGIN': str(transfer.owner.account.login),
+                    'USER_NICK': str(transfer.owner.nick),
+                    'USER_IPADDR': str(transfer.owner.ip),
+                }
+                print(conf.UPLOAD_SCRIPT, pargs, environ)
+                # utils.getProcessOutput(conf.UPLOAD_SCRIPT, args=pargs, env=environ)

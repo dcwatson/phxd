@@ -2,12 +2,8 @@
 from phxd.constants import *
 from phxd.packet import HLPacket
 from phxd.protocol import HLServerProtocol, HLTransferProtocol
-from phxd.server import database
 from phxd.server.config import conf
 from phxd.server.irc.protocol import IRCProtocol
-from phxd.server.signals import (
-    client_connected, client_disconnected, packet_outgoing, packet_type_received, transfer_aborted, transfer_completed,
-    transfer_started)
 from phxd.transfer import HLIncomingTransfer, HLOutgoingTransfer
 from phxd.types import *
 from phxd.utils import HLCharConst
@@ -19,6 +15,9 @@ import logging
 import time
 
 
+logger = logging.getLogger(__name__)
+
+
 class HLServer:
 
     def __init__(self, loop=None):
@@ -26,13 +25,13 @@ class HLServer:
         self.last_uid = 0
         self.last_chat_id = 0
         self.connections = []
+        self.handlers = []
         self.chats = {
             0: HLChat(0, channel=conf.IRC_DEFAULT_CHANNEL),
         }
         self.default_icon = ""
         self.tempBans = {}
         self.start_time = None
-        self.database = database.instance(conf.DB_TYPE, conf.DB_ARG)
         self.last_transfer_id = 0
         self.transfers = []
 
@@ -40,16 +39,19 @@ class HLServer:
     def userlist(self):
         return [c.user for c in self.connections if c.user.valid]
 
+    def register(self, handler):
+        self.handlers.append(handler)
+
+    def fire(self, method, *args, **kwargs):
+        for handler in self.handlers:
+            func = getattr(handler, method, None)
+            if func and callable(func):
+                func(*args, server=self, **kwargs)
+
     def start(self):
-        if not self.database.isConfigured():
-            logging.info("[server] configuring database")
-            self.database.setup()
-            logging.info("[server] creating admin user")
-            admin = HLAccount("admin")
-            admin.name = "Administrator"
-            admin.privs = 18443313597422501888
-            admin.password = hashlib.md5(b"adminpass").hexdigest()
-            self.database.saveAccount(admin)
+        if HLAccount.query().count() == 0:
+            logger.info('Creating admin user with password "letmein" -- CHANGE THIS IMMEDIATELY!')
+            HLAccount.insert(login='admin', name='Administrator', privs=2**63 - 1, password=hashlib.md5(b"letmein").hexdigest())
         for port in conf.SERVER_PORTS:
             self.loop.run_until_complete(
                 self.loop.create_server(lambda: HLServerProtocol(self), conf.SERVER_BIND, port)
@@ -72,7 +74,7 @@ class HLServer:
         self.loop.call_later(5.0, self.check_users)
         if conf.ENABLE_TRACKER_REGISTER:
             self.loop.call_later(conf.TRACKER_INTERVAL, self.ping_tracker)
-        logging.info("[server] started on ports %s", conf.SERVER_PORTS)
+        logger.info("Server started on ports %s", conf.SERVER_PORTS)
 
     # Notification methods called from HLProtocol instances
 
@@ -80,7 +82,7 @@ class HLServer:
         self.last_uid += 1
         conn.user = HLUser(self.last_uid, conn.address)
         self.connections.append(conn)
-        client_connected.send(conn, server=self, user=conn.user)
+        self.fire('user_connected', user=conn.user)
 
     def notify_magic(self, conn, magic):
         (proto1, proto2, major, minor) = unpack("!LLHH", magic)
@@ -89,7 +91,7 @@ class HLServer:
             conn.transport.close()
 
     def notify_disconnect(self, conn):
-        client_disconnected.send(conn, server=self, user=conn.user)
+        self.fire('user_disconnected', user=conn.user)
         self.connections.remove(conn)
 
     def notify_packet(self, conn, packet):
@@ -99,9 +101,9 @@ class HLServer:
                 if conn.user.valid and ((conn.user.status & STATUS_AWAY) != 0):
                     conn.user.status &= ~STATUS_AWAY
                     self.send_user_change(conn.user)
-            # TODO: https://github.com/jek/blinker/pull/42
-            packet_type_received.send(str(packet.kind), server=self, user=conn.user, packet=packet)
+            self.fire('packet_received', user=conn.user, packet=packet)
         except HLException as e:
+            print(e)
             self.send_packet(packet.error(e.msg), conn.user)
             if e.fatal:
                 logging.debug("fatal error, disconnecting %s: %s", conn.user, str(e))
@@ -119,19 +121,20 @@ class HLServer:
         if conn.transfer in self.transfers:
             if conn.transfer.is_complete():
                 logging.info("[xfer] completed %s", conn.transfer)
-                transfer_completed.send(self, transfer=conn.transfer)
+                self.fire('transfer_completed', transfer=conn.transfer)
             else:
                 logging.info("[xfer] aborted %s", conn.transfer)
-                transfer_aborted.send(self, transfer=conn.transfer)
+                self.fire('transfer_aborted', transfer=conn.transfer)
             self.transfers.remove(conn.transfer)
 
     def transfer_magic(self, conn, xfid, size, flags):
+        logger.debug('Got transfer magic for %d (%d bytes)', xfid, size)
         for transfer in self.transfers:
             if transfer.id == xfid:
                 if transfer.incoming and transfer.total == 0:
                     transfer.total = size
                 conn.start(transfer)
-                transfer_started.send(self, transfer=transfer)
+                self.fire('transfer_started', transfer=conn.transfer)
 
     # Notifications from IRCProtocol
 
@@ -139,10 +142,10 @@ class HLServer:
         self.last_uid += 1
         conn.user = HLUser(self.last_uid, conn.address)
         self.connections.append(conn)
-        client_connected.send(conn, server=self, user=conn.user)
+        self.fire('user_connected', user=conn.user)
 
     def irc_disconnect(self, conn):
-        client_disconnected.send(conn, server=self, user=conn.user)
+        self.fire('user_disconnected', user=conn.user)
         self.connections.remove(conn)
 
     # Packet sending methods
@@ -159,7 +162,7 @@ class HLServer:
         else:
             conns = self.connections
         try:
-            packet_outgoing.send(packet.kind, server=self, packet=packet, users=[c.user for c in conns])
+            self.fire('packet_filter', users=[c.user for c in conns], packet=packet)
         except:
             logging.exception('packet filter error')
         for conn in conns:
@@ -183,12 +186,14 @@ class HLServer:
 
     def add_upload(self, user, file):
         self.last_transfer_id += 1
+        logger.debug('Adding upload %d: %s', self.last_transfer_id, file)
         info = HLIncomingTransfer(self.last_transfer_id, file, user)
         self.transfers.append(info)
         return info
 
     def add_download(self, user, file, resume):
         self.last_transfer_id += 1
+        logger.debug('Adding download %d: %s', self.last_transfer_id, file)
         info = HLOutgoingTransfer(self.last_transfer_id, file, user, resume)
         self.transfers.append(info)
         return info
@@ -222,7 +227,8 @@ class HLServer:
         """ Returns the reason given for a ban, if it exists. Otherwise returns None. """
         if addr in self.tempBans:
             return self.tempBans[addr]
-        return self.database.checkBanlist(addr)
+        # return self.database.checkBanlist(addr)
+        return False
 
     # User functions
 
