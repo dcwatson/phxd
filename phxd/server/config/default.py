@@ -38,9 +38,10 @@ SSL_CERT_FILE = 'certs/cacert.pem'
 ################################################################################
 
 ENABLE_TRACKER_REGISTER = False
-TRACKER_ADDRESS = "hltracker.com"
-TRACKER_PORT = 5499
-TRACKER_PASSWORD = ""
+TRACKERS = [
+  {'ADDRESS': 'address1', 'PORT': 5499, 'PASSWORD': 'secret'},
+  {'ADDRESS': 'address2', 'PORT': 5499, 'PASSWORD': 'secret'},
+]
 TRACKER_INTERVAL = 5 * 60
 SERVER_DESCRIPTION = "My phxd server."
 
