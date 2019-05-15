@@ -216,8 +216,9 @@ class HLServer(Factory):
                     self.sendUserChange(user)
 
     def pingTracker(self):
-        try:
-            tracker.send_update(conf.TRACKER_ADDRESS, conf.TRACKER_PORT, int(self.startTime), conf.SERVER_NAME,
-                    conf.SERVER_DESCRIPTION, conf.SERVER_PORTS[0], len(self.userlist), conf.TRACKER_PASSWORD)
-        except:
-            logging.exception('error pinging tracker')
+        for tracker_conf in conf.TRACKERS:
+            try:
+                tracker.send_update(tracker_conf['ADDRESS'], tracker_conf['PORT'], int(self.startTime), conf.SERVER_NAME,
+                        conf.SERVER_DESCRIPTION, conf.SERVER_PORTS[0], len(self.userlist), tracker_conf['PASSWORD'])
+            except:
+                logging.exception('error pinging tracker')
