@@ -58,11 +58,11 @@ class HLOutgoingTransfer(HLTransfer):
 
     READ_SIZE = 2 ** 14
 
-    def __init__(self, id, file, resume):
+    def __init__(self, id, file, resume, options):
         HLTransfer.__init__(self, id, file, False)
         self.resume = resume
-        self.total = self.file.streamSize(resume)
-        self.stream = self.file.stream(resume, self.READ_SIZE)
+        self.total = self.file.streamSize(resume, options)
+        self.stream = self.file.stream(resume, options, self.READ_SIZE)
 
     def overallPercent(self):
         # TODO: this doesn't take into account previous partial transfers

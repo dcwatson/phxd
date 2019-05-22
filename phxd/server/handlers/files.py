@@ -100,15 +100,15 @@ def handleFileDownload(server, user, packet):
     dir = parseDir(packet.getBinary(DATA_DIR))
     name = packet.getString(DATA_FILENAME, "")
     resume = HLResumeData(packet.getBinary(DATA_RESUME))
-    # options = packet.getNumber(DATA_XFEROPTIONS, 0)
+    options = packet.getNumber(DATA_XFEROPTIONS, 0)
 
     path = buildPath(user.account.fileRoot, dir, name)
     if not os.path.exists(path):
         raise HLException("Specified file does not exist.")
 
     file = HLFile(path)
-    xfer = server.fileserver.addDownload(user, file, resume)
-    dataSize = file.size() - resume.totalOffset()
+    xfer = server.fileserver.addDownload(user, file, resume, options)
+    dataSize = file.size('DATA' if options == 2 else None) - resume.totalOffset()
 
     reply = packet.response()
     reply.addNumber(DATA_XFERSIZE, xfer.total)

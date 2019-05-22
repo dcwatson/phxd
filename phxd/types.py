@@ -368,7 +368,10 @@ class HLFile:
         size = self.size()
         return pack("!5L", self.getType(), self.getCreator(), size, size, len(namedata)) + namedata
 
-    def streamSize(self, resume):
+    def streamSize(self, resume, options):
+        if options == 2:
+            # File previews seem to just send raw data forks, no flattened fork data.
+            return self.size('DATA')
         namedata = self.name.encode('utf-8')
         total = 24 + 16 + 74 + len(namedata)  # FILP header + INFO fork
         for fork in self.forks():
@@ -377,22 +380,27 @@ class HLFile:
             total += 16 + remaining
         return total
 
-    def stream(self, resume, chunkSize=16384):
-        forks = self.forks()
-        namedata = self.name.encode('utf-8')
-        yield pack("!LHLLLLH", HLCharConst("FILP"), 1, 0, 0, 0, 0, len(forks) + 1)
-        yield pack("!4L", HLCharConst("INFO"), 0, 0, 74 + len(namedata))
-        yield pack("!5L", HLCharConst("AMAC"), self.getType(), self.getCreator(), 0, 0)
-        yield bytes(32)
-        yield pack("!HHL", 0, 0, 0)  # date created
-        yield pack("!HHL", 0, 0, 0)  # date modified
-        yield pack("!HH", 0, len(namedata))
-        yield namedata
-        yield pack("!H", 0)
+    def stream(self, resume, options, chunkSize=16384):
+        if options == 2:
+            # File previews seem to just send raw data forks, no flattened fork data.
+            forks = ['DATA']
+        else:
+            forks = self.forks()
+            namedata = self.name.encode('utf-8')
+            yield pack("!LHLLLLH", HLCharConst("FILP"), 1, 0, 0, 0, 0, len(forks) + 1)
+            yield pack("!4L", HLCharConst("INFO"), 0, 0, 74 + len(namedata))
+            yield pack("!5L", HLCharConst("AMAC"), self.getType(), self.getCreator(), 0, 0)
+            yield bytes(32)
+            yield pack("!HHL", 0, 0, 0)  # date created
+            yield pack("!HHL", 0, 0, 0)  # date modified
+            yield pack("!HH", 0, len(namedata))
+            yield namedata
+            yield pack("!H", 0)
         for fork in forks:
             offset = resume.forkOffset(HLCharConst(fork))
             remaining = self.size(fork) - offset
-            yield pack("!4L", HLCharConst(fork), 0, 0, remaining)
+            if options != 2:
+                yield pack("!4L", HLCharConst(fork), 0, 0, remaining)
             self.seek(fork, offset)
             data = self.read(fork, chunkSize)
             while data:

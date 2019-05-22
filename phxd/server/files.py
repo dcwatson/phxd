@@ -67,9 +67,9 @@ class HLFileServer (Factory):
         self.transfers.append(info)
         return info
 
-    def addDownload(self, user, file, resume):
+    def addDownload(self, user, file, resume, options):
         self.lastTransferID += 1
-        info = HLDownload(self.lastTransferID, file, resume)
+        info = HLDownload(self.lastTransferID, file, resume, options)
         info.owner = user.uid
         self.transfers.append(info)
         return info
